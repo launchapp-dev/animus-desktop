@@ -4,9 +4,12 @@ mod event_bridge;
 mod github;
 mod plugin;
 mod project;
+mod queue;
 mod state;
+mod subject;
 mod template;
 mod tray;
+mod workflow;
 
 use state::AppState;
 use tauri::Manager;
@@ -71,6 +74,21 @@ pub fn run() {
             event_bridge::bridge_attach_project,
             event_bridge::bridge_detach_project,
             event_bridge::bridge_active_projects,
+            workflow::workflow_run_task,
+            workflow::workflow_run_id,
+            workflow::workflow_list,
+            queue::queue_list,
+            queue::queue_stats,
+            queue::queue_hold,
+            queue::queue_release,
+            queue::queue_drop,
+            subject::subject_list,
+            subject::subject_get,
+            subject::subject_next,
+            subject::animus_status,
+            subject::animus_history,
+            subject::logs_tail,
+            subject::daemon_health,
         ])
         .run(tauri::generate_context!())
         .expect("error while running animus desktop");
