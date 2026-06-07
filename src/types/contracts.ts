@@ -69,6 +69,7 @@ export type PhaseStatus =
 export interface Project {
   id: string;
   repo_full_name: string;
+  repo_path?: string;
   language: string;
   template: string;
   webhook_id: number | null;
