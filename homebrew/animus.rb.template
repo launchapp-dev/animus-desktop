@@ -1,0 +1,22 @@
+cask "animus" do
+  version "VERSION_PLACEHOLDER"
+  sha256 "SHA256_PLACEHOLDER"
+
+  url "https://github.com/launchapp-dev/animus-desktop/releases/download/v#{version}/Animus.app.tar.gz"
+  name "Animus"
+  desc "Local-first agentic CI/CD desktop app"
+  homepage "https://github.com/launchapp-dev/animus-desktop"
+
+  auto_updates true
+  depends_on macos: ">= :monterey"
+
+  app "Animus.app"
+
+  zap trash: [
+    "~/Library/Application Support/dev.animus.desktop",
+    "~/Library/Caches/dev.animus.desktop",
+    "~/Library/Preferences/dev.animus.desktop.plist",
+    "~/Library/Saved Application State/dev.animus.desktop.savedState",
+    "~/.animus",
+  ]
+end

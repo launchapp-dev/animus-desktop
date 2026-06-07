@@ -37,6 +37,16 @@
     ],
     "macOS": {
       "minimumSystemVersion": "12.0"
+    },
+    "createUpdaterArtifacts": "v1Compatible"
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/launchapp-dev/animus-desktop/releases/latest/download/latest.json"
+      ],
+      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY"
     }
   }
 }
