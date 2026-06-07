@@ -68,6 +68,9 @@ pub fn run() {
             project::project_setup_template,
             template::template_render,
             cycle_logs::cycle_logs_subscribe,
+            event_bridge::bridge_attach_project,
+            event_bridge::bridge_detach_project,
+            event_bridge::bridge_active_projects,
         ])
         .run(tauri::generate_context!())
         .expect("error while running animus desktop");

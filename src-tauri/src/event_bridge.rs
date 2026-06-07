@@ -1,11 +1,17 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+use tauri::async_runtime::JoinHandle;
+use tokio::sync::Mutex;
+
+use crate::state::AppState;
 
 const INITIAL_BACKOFF_MS: u64 = 500;
 const MAX_BACKOFF_MS: u64 = 30_000;
@@ -21,6 +27,7 @@ pub struct DaemonLogEvent {
     #[cfg_attr(test, ts(type = "unknown"))]
     pub meta: Option<Value>,
     pub raw: String,
+    pub project_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +35,7 @@ pub struct DaemonLogEvent {
 #[cfg_attr(test, ts(export, export_to = "../../src/types/generated/"))]
 pub struct DaemonStatusChanged {
     pub status: String,
+    pub project_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,21 +49,128 @@ pub struct CycleEvent {
     pub msg: Option<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct BridgeManager {
+    tasks: Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
+}
+
+impl BridgeManager {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub async fn spawn_for_project(&self, app: AppHandle, project_id: String, repo_path: PathBuf) {
+        let mut tasks = self.tasks.lock().await;
+        if tasks.contains_key(&project_id) {
+            return;
+        }
+        let pid = project_id.clone();
+        let handle = tauri::async_runtime::spawn(async move {
+            run_loop(app, Some(pid), Some(repo_path)).await;
+        });
+        tasks.insert(project_id, handle);
+    }
+
+    pub async fn spawn_global(&self, app: AppHandle) {
+        let mut tasks = self.tasks.lock().await;
+        if tasks.contains_key("__global__") {
+            return;
+        }
+        let handle = tauri::async_runtime::spawn(async move {
+            run_loop(app, None, None).await;
+        });
+        tasks.insert("__global__".to_string(), handle);
+    }
+
+    pub async fn kill_for_project(&self, project_id: &str) {
+        let mut tasks = self.tasks.lock().await;
+        if let Some(handle) = tasks.remove(project_id) {
+            handle.abort();
+        }
+    }
+
+    pub async fn active_project_ids(&self) -> Vec<String> {
+        let tasks = self.tasks.lock().await;
+        tasks
+            .keys()
+            .filter(|k| k.as_str() != "__global__")
+            .cloned()
+            .collect()
+    }
+}
+
 pub fn start(app: AppHandle) {
+    let manager = BridgeManager::new();
+    app.manage(manager.clone());
+
     tauri::async_runtime::spawn(async move {
-        run_loop(app).await;
+        manager.spawn_global(app.clone()).await;
+        bootstrap_existing_projects(&app, &manager).await;
     });
 }
 
-async fn run_loop(app: AppHandle) {
+async fn bootstrap_existing_projects(app: &AppHandle, manager: &BridgeManager) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let projects = state.projects.read().await;
+    for project in projects.values() {
+        if project.repo_path.trim().is_empty() {
+            continue;
+        }
+        let path = PathBuf::from(&project.repo_path);
+        if !path.exists() {
+            continue;
+        }
+        manager
+            .spawn_for_project(app.clone(), project.id.clone(), path)
+            .await;
+    }
+}
+
+#[tauri::command]
+pub async fn bridge_attach_project(
+    app: AppHandle,
+    manager: tauri::State<'_, BridgeManager>,
+    project_id: String,
+    repo_path: String,
+) -> Result<(), String> {
+    let path = PathBuf::from(&repo_path);
+    if !path.exists() {
+        return Err(format!("repo_path does not exist: {repo_path}"));
+    }
+    manager.spawn_for_project(app, project_id, path).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn bridge_detach_project(
+    manager: tauri::State<'_, BridgeManager>,
+    project_id: String,
+) -> Result<(), String> {
+    manager.kill_for_project(&project_id).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn bridge_active_projects(
+    manager: tauri::State<'_, BridgeManager>,
+) -> Result<Vec<String>, String> {
+    Ok(manager.active_project_ids().await)
+}
+
+async fn run_loop(app: AppHandle, project_id: Option<String>, project_root: Option<PathBuf>) {
     let mut backoff_ms = INITIAL_BACKOFF_MS;
     loop {
-        match run_once(&app).await {
+        match run_once(&app, project_id.as_deref(), project_root.as_deref()).await {
             Ok(()) => {
                 backoff_ms = INITIAL_BACKOFF_MS;
             }
             Err(err) => {
-                eprintln!("event_bridge: stream error: {err}");
+                eprintln!(
+                    "event_bridge[{}]: stream error: {err}",
+                    project_id.as_deref().unwrap_or("__global__")
+                );
             }
         }
 
@@ -86,13 +201,20 @@ fn animus_binary_path() -> Option<PathBuf> {
     }
 }
 
-async fn run_once(app: &AppHandle) -> Result<(), String> {
+async fn run_once(
+    app: &AppHandle,
+    project_id: Option<&str>,
+    project_root: Option<&std::path::Path>,
+) -> Result<(), String> {
     let bin = animus_binary_path().ok_or_else(|| "animus binary not found".to_string())?;
 
-    let mut child = Command::new(&bin)
-        .arg("daemon")
-        .arg("stream")
-        .arg("--json")
+    let mut cmd = Command::new(&bin);
+    cmd.arg("daemon").arg("stream").arg("--json");
+    if let Some(root) = project_root {
+        cmd.arg("--project-root").arg(root);
+    }
+
+    let mut child = cmd
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
@@ -109,7 +231,7 @@ async fn run_once(app: &AppHandle) -> Result<(), String> {
         tokio::select! {
             line = reader.next_line() => {
                 match line {
-                    Ok(Some(text)) => dispatch_line(app, &text),
+                    Ok(Some(text)) => dispatch_line(app, project_id, &text),
                     Ok(None) => {
                         let _ = child.wait().await;
                         return Ok(());
@@ -134,7 +256,7 @@ async fn run_once(app: &AppHandle) -> Result<(), String> {
     }
 }
 
-fn dispatch_line(app: &AppHandle, raw: &str) {
+fn dispatch_line(app: &AppHandle, project_id: Option<&str>, raw: &str) {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return;
@@ -153,6 +275,8 @@ fn dispatch_line(app: &AppHandle, raw: &str) {
         _ => (None, None, None, None, None),
     };
 
+    let pid = project_id.map(|s| s.to_string());
+
     let log_event = DaemonLogEvent {
         ts: ts.clone(),
         level: level.clone(),
@@ -160,6 +284,7 @@ fn dispatch_line(app: &AppHandle, raw: &str) {
         msg: msg.clone(),
         meta: meta.clone(),
         raw: trimmed.to_string(),
+        project_id: pid.clone(),
     };
     let _ = app.emit("daemon-log", &log_event);
 
@@ -173,6 +298,7 @@ fn dispatch_line(app: &AppHandle, raw: &str) {
                     "daemon-status-changed",
                     &DaemonStatusChanged {
                         status: status.to_string(),
+                        project_id: pid.clone(),
                     },
                 );
             }
@@ -180,7 +306,7 @@ fn dispatch_line(app: &AppHandle, raw: &str) {
         "phase" | "workflow" => {
             if let Some(status) = cycle_status_from_msg(msg_str) {
                 let cycle = CycleEvent {
-                    project_id: meta_string(meta.as_ref(), "project_id"),
+                    project_id: pid.clone().or_else(|| meta_string(meta.as_ref(), "project_id")),
                     cycle_id: meta_string(meta.as_ref(), "cycle_id")
                         .or_else(|| meta_string(meta.as_ref(), "run_id"))
                         .or_else(|| meta_string(meta.as_ref(), "workflow_id")),
