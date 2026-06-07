@@ -1028,3 +1028,43 @@ code {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--border-strong);
 }
+
+/* ---------- Project sections (Needs you / Running / Top / Rest) ---------- */
+.project-section {
+  margin-top: 24px;
+}
+.project-section:first-of-type {
+  margin-top: 8px;
+}
+.project-section__header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.project-section__header .section__title {
+  margin-bottom: 0;
+}
+.project-section__count {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+}
+.project-section__expand {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  color: var(--text-muted);
+  font-size: 12px;
+  transition: background 0.08s, color 0.08s, border-color 0.08s;
+}
+.project-section__expand:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
