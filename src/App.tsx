@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   HashRouter,
   Link,
@@ -7,6 +7,7 @@ import {
   Routes,
   useLocation,
 } from "react-router-dom";
+import { useHotkeys } from "react-hotkeys-hook";
 import { useDaemonStore } from "./state/daemon";
 import { useAuthStore } from "./state/auth";
 import { ProjectList } from "./views/ProjectList";
@@ -14,8 +15,9 @@ import { ProjectDetail } from "./views/ProjectDetail";
 import { CycleDetail } from "./views/CycleDetail";
 import { Settings } from "./views/Settings";
 import { AddProjectFlow } from "./views/AddProjectFlow";
+import { CommandPalette } from "./components/CommandPalette";
 
-function Sidebar() {
+function Sidebar({ onOpenPalette }: { onOpenPalette: () => void }) {
   const daemon = useDaemonStore((s) => s.status);
   const auth = useAuthStore((s) => s.status);
   const location = useLocation();
@@ -53,6 +55,25 @@ function Sidebar() {
         <NavLink to="/settings" className="nav-link">
           Settings
         </NavLink>
+        <button
+          type="button"
+          onClick={onOpenPalette}
+          className="nav-link"
+          style={{
+            background: "transparent",
+            border: "none",
+            textAlign: "left",
+            width: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <span>Command palette</span>
+          <span className="mono small" style={{ color: "var(--text-faint)" }}>
+            ⌘K
+          </span>
+        </button>
       </nav>
 
       <div className="sidebar__footer">
@@ -78,15 +99,27 @@ function Sidebar() {
 function AppShell() {
   const refreshDaemon = useDaemonStore((s) => s.refresh);
   const refreshAuth = useAuthStore((s) => s.refresh);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   useEffect(() => {
     void refreshDaemon();
     void refreshAuth();
   }, [refreshDaemon, refreshAuth]);
 
+  // ⌘K / Ctrl+K toggles the global command palette.
+  useHotkeys(
+    "mod+k",
+    (event) => {
+      event.preventDefault();
+      setPaletteOpen((o) => !o);
+    },
+    { enableOnFormTags: true, enableOnContentEditable: true },
+    [],
+  );
+
   return (
     <div className="app-shell">
-      <Sidebar />
+      <Sidebar onOpenPalette={() => setPaletteOpen(true)} />
       <main className="content">
         <Routes>
           <Route path="/" element={<ProjectList />} />
@@ -99,6 +132,7 @@ function AppShell() {
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </div>
   );
 }

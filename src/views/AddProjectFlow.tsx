@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Badge } from "../components/Badge";
+import { Badge as UIBadge } from "../components/ui/badge";
 import { Button } from "../components/Button";
 import { Spinner } from "../components/Spinner";
+import { PackCard } from "../components/PackCard";
+import { Input } from "../components/ui/input";
 import {
   githubListRepos,
   githubRegisterWebhook,
@@ -13,18 +16,53 @@ import {
 import { useAuthStore } from "../state/auth";
 import { useDaemonStore } from "../state/daemon";
 import { useProjectsStore } from "../state/projects";
+import { PACKS, type PackMeta } from "../data/packs";
 import type { Repo } from "../types/contracts";
 
 const STEPS = [
   "Daemon",
   "GitHub",
   "Repository",
-  "Template",
+  "Pack",
+  "Trigger",
   "Tunnel",
   "Register",
 ] as const;
 
-type StepIndex = 0 | 1 | 2 | 3 | 4 | 5;
+type StepIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+type TriggerKind = "pull_request" | "push" | "release" | "schedule";
+
+interface TriggerOption {
+  kind: TriggerKind;
+  title: string;
+  description: string;
+}
+
+const TRIGGERS: TriggerOption[] = [
+  {
+    kind: "pull_request",
+    title: "Pull requests",
+    description:
+      "Run on opened, reopened, synchronize, and ready-for-review events. The default for CI/CD.",
+  },
+  {
+    kind: "push",
+    title: "Push to branch",
+    description:
+      "Run whenever commits land on the default branch (or a tag is pushed).",
+  },
+  {
+    kind: "release",
+    title: "Release published",
+    description: "Run when a GitHub release is published or edited.",
+  },
+  {
+    kind: "schedule",
+    title: "Schedule",
+    description: "Run on a cron expression (UTC).",
+  },
+];
 
 function languageKey(lang: string | null): string {
   if (!lang) return "typescript";
@@ -105,11 +143,21 @@ export function AddProjectFlow() {
   const [search, setSearch] = useState("");
   const [selectedRepo, setSelectedRepo] = useState<Repo | null>(null);
 
-  // Step 4: tunnel URL
+  // Step 3: pack picker (default CI/CD)
+  const [selectedPack, setSelectedPack] = useState<PackMeta>(
+    () => PACKS.find((p) => p.id === "ci-cd")!,
+  );
+
+  // Step 4: trigger
+  const [selectedTrigger, setSelectedTrigger] =
+    useState<TriggerKind>("pull_request");
+  const [cron, setCron] = useState("0 6 * * *");
+
+  // Step 5: tunnel URL
   const [tunnelUrl, setTunnelUrl] = useState("");
   const [tunnelTouched, setTunnelTouched] = useState(false);
 
-  // Step 5: register
+  // Step 6: register
   const [registering, setRegistering] = useState(false);
   const [registerError, setRegisterError] = useState<string | null>(null);
 
@@ -181,22 +229,32 @@ export function AddProjectFlow() {
     }
   }, [tunnelUrl]);
 
+  // Tunnel is only required for webhook-based triggers. A schedule trigger can
+  // skip the tunnel step entirely (cron runs locally).
+  const tunnelRequired = selectedTrigger !== "schedule";
+
   async function handleRegister() {
     if (!selectedRepo) return;
     setRegistering(true);
     setRegisterError(null);
     try {
-      await settingsSetTunnelUrl(tunnelUrl);
+      if (tunnelRequired) {
+        await settingsSetTunnelUrl(tunnelUrl);
+      }
       const project = await projectSetupTemplate({
         repoFullName: selectedRepo.full_name,
         language,
-        template: "ci-cd",
+        template: selectedPack.id,
       });
-      const webhook = await githubRegisterWebhook({
-        repoFullName: selectedRepo.full_name,
-        webhookUrl: tunnelUrl,
-      });
-      const finalProject = { ...project, webhook_id: webhook.id };
+      let webhookId: number | null = null;
+      if (tunnelRequired) {
+        const webhook = await githubRegisterWebhook({
+          repoFullName: selectedRepo.full_name,
+          webhookUrl: tunnelUrl,
+        });
+        webhookId = webhook.id;
+      }
+      const finalProject = { ...project, webhook_id: webhookId };
       addProject(finalProject);
       navigate(`/projects/${finalProject.id}`);
     } catch (e) {
@@ -205,6 +263,8 @@ export function AddProjectFlow() {
       setRegistering(false);
     }
   }
+
+  const visiblePacks = useMemo(() => PACKS.filter((p) => !p.hidden), []);
 
   return (
     <div className="view view--narrow">
@@ -319,8 +379,7 @@ export function AddProjectFlow() {
             ) : (
               <>
                 <p className="muted small">
-                  We'll use the GitHub device flow — no browser redirect
-                  needed.
+                  We'll use the GitHub device flow — no browser redirect needed.
                 </p>
                 <div className="card__actions">
                   <Button
@@ -390,58 +449,39 @@ export function AddProjectFlow() {
 
         {step === 3 && selectedRepo && (
           <div className="card">
-            <h2 className="card__title">Confirm template</h2>
-            <p>
-              We'll set up CI/CD for this <strong>{language}</strong> project.
-              Lint, test, build, and post status checks back to GitHub.
+            <h2 className="card__title">Pick a workflow pack</h2>
+            <p className="muted small">
+              Animus ships 11 team templates. CI/CD is the v1 launch lighthouse;
+              the others ship as templates land.
             </p>
-            <pre className="yaml-preview">
-              <code>{workflowPreview(language)}</code>
-            </pre>
+            <div className="mt-3 grid grid-cols-2 gap-2.5">
+              {visiblePacks.map((p) => (
+                <PackCard
+                  key={p.id}
+                  pack={p}
+                  selected={selectedPack.id === p.id}
+                  onSelect={(pack) => setSelectedPack(pack)}
+                />
+              ))}
+            </div>
+            {selectedPack.id === "ci-cd" && (
+              <details className="mt-3 rounded-md border border-border bg-bg p-3 text-[12px]">
+                <summary className="cursor-pointer select-none text-text-muted">
+                  Preview generated workflow for <strong>{language}</strong>
+                </summary>
+                <pre className="yaml-preview mt-2">
+                  <code>{workflowPreview(language)}</code>
+                </pre>
+              </details>
+            )}
             <div className="card__actions">
               <Button variant="ghost" onClick={() => setStep(2)}>
                 Back
               </Button>
-              <Button variant="primary" onClick={() => setStep(4)}>
-                Looks good
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {step === 4 && (
-          <div className="card">
-            <h2 className="card__title">Webhook tunnel URL</h2>
-            <p className="muted small">
-              GitHub will POST pull-request events here. Use the public URL
-              from your Cloudflare Tunnel (or another reverse proxy) pointing
-              at the local daemon.
-            </p>
-            <div className="form-row">
-              <input
-                className="input mono"
-                type="url"
-                placeholder="https://ci.your-domain.dev/webhook"
-                value={tunnelUrl}
-                onChange={(e) => {
-                  setTunnelUrl(e.target.value);
-                  setTunnelTouched(true);
-                }}
-              />
-            </div>
-            {tunnelTouched && !tunnelValid && (
-              <div className="alert alert--warn">
-                That doesn't look like a valid URL.
-              </div>
-            )}
-            <div className="card__actions">
-              <Button variant="ghost" onClick={() => setStep(3)}>
-                Back
-              </Button>
               <Button
                 variant="primary"
-                disabled={!tunnelValid}
-                onClick={() => setStep(5)}
+                onClick={() => setStep(4)}
+                disabled={!selectedPack.enabled}
               >
                 Continue
               </Button>
@@ -449,7 +489,128 @@ export function AddProjectFlow() {
           </div>
         )}
 
-        {step === 5 && selectedRepo && (
+        {step === 4 && selectedRepo && (
+          <div className="card">
+            <h2 className="card__title">Choose a trigger</h2>
+            <p className="muted small">
+              Pick what fires this team. v1 supports GitHub webhook events and
+              cron schedules; more triggers from the 307 subject backends ship
+              in a later release.
+            </p>
+            <div className="mt-3 flex flex-col gap-2">
+              {TRIGGERS.map((t) => {
+                const active = selectedTrigger === t.kind;
+                return (
+                  <button
+                    key={t.kind}
+                    type="button"
+                    onClick={() => setSelectedTrigger(t.kind)}
+                    className={[
+                      "flex flex-col items-start gap-1 rounded-md border p-3 text-left transition-colors",
+                      active
+                        ? "border-accent bg-accent-bg"
+                        : "border-border bg-bg-elevated hover:border-border-strong hover:bg-bg-hover",
+                    ].join(" ")}
+                  >
+                    <div className="flex w-full items-center justify-between">
+                      <span className="text-sm font-semibold text-text">
+                        {t.title}
+                      </span>
+                      {active && (
+                        <UIBadge
+                          variant="info"
+                          className="text-[10px] uppercase tracking-wider"
+                        >
+                          Selected
+                        </UIBadge>
+                      )}
+                    </div>
+                    <span className="text-[12px] text-text-muted">
+                      {t.description}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {selectedTrigger === "schedule" && (
+              <div className="mt-3">
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                  Cron expression
+                </label>
+                <Input
+                  className="mono"
+                  value={cron}
+                  onChange={(e) => setCron(e.target.value)}
+                  placeholder="0 6 * * *"
+                />
+                <p className="mt-1 text-[11px] text-text-faint">
+                  Standard 5-field cron, UTC. Default: every day at 06:00.
+                </p>
+              </div>
+            )}
+            <div className="card__actions">
+              <Button variant="ghost" onClick={() => setStep(3)}>
+                Back
+              </Button>
+              <Button variant="primary" onClick={() => setStep(5)}>
+                Continue
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {step === 5 && (
+          <div className="card">
+            <h2 className="card__title">
+              {tunnelRequired ? "Webhook tunnel URL" : "Tunnel (skipped)"}
+            </h2>
+            {tunnelRequired ? (
+              <>
+                <p className="muted small">
+                  GitHub will POST {selectedTrigger.replace("_", " ")} events
+                  here. Use the public URL from your Cloudflare Tunnel (or
+                  another reverse proxy) pointing at the local daemon.
+                </p>
+                <div className="form-row">
+                  <input
+                    className="input mono"
+                    type="url"
+                    placeholder="https://ci.your-domain.dev/webhook"
+                    value={tunnelUrl}
+                    onChange={(e) => {
+                      setTunnelUrl(e.target.value);
+                      setTunnelTouched(true);
+                    }}
+                  />
+                </div>
+                {tunnelTouched && !tunnelValid && (
+                  <div className="alert alert--warn">
+                    That doesn't look like a valid URL.
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="muted small">
+                Schedule triggers run locally on the daemon. No public webhook
+                URL needed.
+              </p>
+            )}
+            <div className="card__actions">
+              <Button variant="ghost" onClick={() => setStep(4)}>
+                Back
+              </Button>
+              <Button
+                variant="primary"
+                disabled={tunnelRequired && !tunnelValid}
+                onClick={() => setStep(6)}
+              >
+                Continue
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {step === 6 && selectedRepo && (
           <div className="card">
             <h2 className="card__title">Register</h2>
             <p className="muted small">Final review before we wire it up.</p>
@@ -458,10 +619,20 @@ export function AddProjectFlow() {
               <dd>{selectedRepo.full_name}</dd>
               <dt>Language</dt>
               <dd>{language}</dd>
-              <dt>Template</dt>
-              <dd>ci-cd</dd>
-              <dt>Webhook URL</dt>
-              <dd className="mono small">{tunnelUrl}</dd>
+              <dt>Pack</dt>
+              <dd>{selectedPack.title}</dd>
+              <dt>Trigger</dt>
+              <dd>
+                {selectedTrigger === "schedule"
+                  ? `schedule (${cron})`
+                  : selectedTrigger.replace("_", " ")}
+              </dd>
+              {tunnelRequired && (
+                <>
+                  <dt>Webhook URL</dt>
+                  <dd className="mono small">{tunnelUrl}</dd>
+                </>
+              )}
             </dl>
             {registerError && (
               <div className="alert alert--error">{registerError}</div>
@@ -469,7 +640,7 @@ export function AddProjectFlow() {
             <div className="card__actions">
               <Button
                 variant="ghost"
-                onClick={() => setStep(4)}
+                onClick={() => setStep(5)}
                 disabled={registering}
               >
                 Back

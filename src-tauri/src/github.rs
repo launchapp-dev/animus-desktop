@@ -12,7 +12,7 @@ const USER_AGENT: &str = "animus-desktop";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, export_to = "../src/types/generated/"))]
+#[cfg_attr(test, ts(export, export_to = "../../src/types/generated/"))]
 pub struct DeviceCodeResponse {
     pub user_code: String,
     pub verification_uri: String,
@@ -23,7 +23,7 @@ pub struct DeviceCodeResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, export_to = "../src/types/generated/"))]
+#[cfg_attr(test, ts(export, export_to = "../../src/types/generated/"))]
 pub struct AuthStatus {
     pub logged_in: bool,
     pub login: Option<String>,
@@ -32,7 +32,7 @@ pub struct AuthStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, export_to = "../src/types/generated/"))]
+#[cfg_attr(test, ts(export, export_to = "../../src/types/generated/"))]
 pub struct Repo {
     pub id: u64,
     pub name: String,
@@ -46,7 +46,7 @@ pub struct Repo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, export_to = "../src/types/generated/"))]
+#[cfg_attr(test, ts(export, export_to = "../../src/types/generated/"))]
 pub struct Webhook {
     pub id: u64,
     pub url: String,

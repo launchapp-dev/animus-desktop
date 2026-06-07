@@ -11,21 +11,28 @@ const INITIAL_BACKOFF_MS: u64 = 500;
 const MAX_BACKOFF_MS: u64 = 30_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, export_to = "../../src/types/generated/"))]
 pub struct DaemonLogEvent {
     pub ts: Option<String>,
     pub level: Option<String>,
     pub cat: Option<String>,
     pub msg: Option<String>,
+    #[cfg_attr(test, ts(type = "unknown"))]
     pub meta: Option<Value>,
     pub raw: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, export_to = "../../src/types/generated/"))]
 pub struct DaemonStatusChanged {
     pub status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, export_to = "../../src/types/generated/"))]
 pub struct CycleEvent {
     pub project_id: Option<String>,
     pub cycle_id: Option<String>,

@@ -7,7 +7,7 @@ use crate::daemon::InstallProgress;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, export_to = "../src/types/generated/"))]
+#[cfg_attr(test, ts(export, export_to = "../../src/types/generated/"))]
 pub struct Plugin {
     pub name: String,
     pub kind: String,

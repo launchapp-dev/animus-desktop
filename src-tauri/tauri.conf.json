@@ -52,10 +52,6 @@
       "icons/icon.ico"
     ],
     "macOS": {
-<<<<<<< HEAD
-      "minimumSystemVersion": "12.0"
-    },
-=======
       "minimumSystemVersion": "12.0",
       "frameworks": [],
       "exceptionDomain": "",
@@ -63,7 +59,6 @@
     },
     "iOS": {},
     "android": {},
->>>>>>> feat/H-marketplace-shadcn-cmdk
     "createUpdaterArtifacts": "v1Compatible"
   },
   "plugins": {
@@ -73,14 +68,11 @@
         "https://github.com/launchapp-dev/animus-desktop/releases/latest/download/latest.json"
       ],
       "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY"
-<<<<<<< HEAD
-=======
     },
     "deep-link": {
       "desktop": {
         "schemes": ["animus"]
       }
->>>>>>> feat/H-marketplace-shadcn-cmdk
     }
   }
 }

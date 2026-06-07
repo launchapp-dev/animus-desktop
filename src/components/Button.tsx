@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { Button as ShadcnButton } from "./ui/button";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 type Size = "sm" | "md";
@@ -9,24 +10,20 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children: ReactNode;
 }
 
+/**
+ * Compatibility wrapper preserving the existing variant/size prop API while
+ * delegating render to the shadcn-based button. Keeps consumers that still
+ * pass `variant="primary"` / `size="md"` working without changes.
+ */
 export function Button({
   variant = "secondary",
   size = "md",
-  className,
   children,
   ...rest
 }: ButtonProps) {
-  const classes = [
-    "btn",
-    `btn--${variant}`,
-    `btn--${size}`,
-    className ?? "",
-  ]
-    .filter(Boolean)
-    .join(" ");
   return (
-    <button className={classes} {...rest}>
+    <ShadcnButton variant={variant} size={size} {...rest}>
       {children}
-    </button>
+    </ShadcnButton>
   );
 }
