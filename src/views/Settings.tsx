@@ -3,45 +3,8 @@ import { Search } from "lucide-react";
 import { Badge } from "../components/Badge";
 import { Button } from "../components/Button";
 import { Spinner } from "../components/Spinner";
+import { PluginCard } from "../components/PluginCard";
 import { Input } from "../components/ui/input";
-import type { Plugin as PluginType } from "../types/contracts";
-
-function PluginCard({
-  plugin,
-  busy,
-  onInstall,
-}: {
-  plugin: PluginType;
-  busy: boolean;
-  onInstall: (p: PluginType) => void;
-}) {
-  return (
-    <div className="plugin-card">
-      <div className="plugin-card__main">
-        <div className="plugin-card__name">{plugin.name}</div>
-        <div className="plugin-card__meta">
-          <span className="muted small">{plugin.kind}</span>
-          <span className="dot-sep">·</span>
-          <span className="muted small">v{plugin.version}</span>
-        </div>
-      </div>
-      <div className="plugin-card__action">
-        {plugin.installed ? (
-          <Badge tone="passed" dot>installed</Badge>
-        ) : (
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={busy}
-            onClick={() => onInstall(plugin)}
-          >
-            {busy ? "Installing…" : "Install"}
-          </Button>
-        )}
-      </div>
-    </div>
-  );
-}
 import {
   pluginInstall,
   pluginInstallDefaults,
