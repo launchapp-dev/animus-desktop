@@ -1,3 +1,4 @@
+mod chat;
 mod cycle_logs;
 mod daemon;
 mod event_bridge;
@@ -89,6 +90,7 @@ pub fn run() {
             subject::animus_history,
             subject::logs_tail,
             subject::daemon_health,
+            chat::chat_send,
         ])
         .run(tauri::generate_context!())
         .expect("error while running animus desktop");

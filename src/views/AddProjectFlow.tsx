@@ -13,6 +13,7 @@ import {
   settingsGetTunnelUrl,
   settingsSetTunnelUrl,
 } from "../api/_invoke";
+import { bridgeAttachProject } from "../api/event_bridge";
 import { useAuthStore } from "../state/auth";
 import { useDaemonStore } from "../state/daemon";
 import { useProjectsStore } from "../state/projects";
@@ -256,6 +257,13 @@ export function AddProjectFlow() {
       }
       const finalProject = { ...project, webhook_id: webhookId };
       addProject(finalProject);
+      if (finalProject.repo_path && finalProject.repo_path.trim().length > 0) {
+        try {
+          await bridgeAttachProject(finalProject.id, finalProject.repo_path);
+        } catch (e) {
+          console.warn("bridge_attach_project failed:", e);
+        }
+      }
       navigate(`/projects/${finalProject.id}`);
     } catch (e) {
       setRegisterError(String(e));

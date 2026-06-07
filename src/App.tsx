@@ -15,6 +15,7 @@ import { ProjectDetail } from "./views/ProjectDetail";
 import { CycleDetail } from "./views/CycleDetail";
 import { Settings } from "./views/Settings";
 import { AddProjectFlow } from "./views/AddProjectFlow";
+import { Chat } from "./views/Chat";
 import { CommandPalette } from "./components/CommandPalette";
 
 function Sidebar({ onOpenPalette }: { onOpenPalette: () => void }) {
@@ -43,6 +44,9 @@ function Sidebar({ onOpenPalette }: { onOpenPalette: () => void }) {
       <nav className="sidebar__nav">
         <NavLink to="/" end className="nav-link">
           Projects
+        </NavLink>
+        <NavLink to="/chat" className="nav-link">
+          Ask Animus
         </NavLink>
         <NavLink
           to="/projects/new"
@@ -123,6 +127,7 @@ function AppShell() {
       <main className="content">
         <Routes>
           <Route path="/" element={<ProjectList />} />
+          <Route path="/chat" element={<Chat />} />
           <Route path="/projects/new" element={<AddProjectFlow />} />
           <Route path="/projects/:id" element={<ProjectDetail />} />
           <Route
