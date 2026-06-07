@@ -1072,3 +1072,60 @@ code {
   color: var(--text);
   border-color: var(--border-strong);
 }
+
+/* ---------- macOS native window chrome ---------- */
+.sidebar__titlebar {
+  height: 28px;
+  margin: -16px -12px 8px -12px;
+  padding: 4px 6px;
+  display: flex;
+  align-items: center;
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.titlebar-controls {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* ---------- Popup window ---------- */
+.popup-view {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.popup-view__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.popup-view__title {
+  letter-spacing: -0.01em;
+}
+
+.popup-view__body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+}
+
+.popup-view__placeholder {
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+}
