@@ -1,0 +1,155 @@
+name: Homebrew tap update
+
+# Runs after the Release workflow finishes successfully. Computes the SHA256 of
+# the published Animus.app.tar.gz, then opens a PR against the
+# `launchapp-dev/homebrew-tap` repo updating Casks/animus.rb to the new version.
+#
+# Gracefully no-ops if:
+#   - the triggering release workflow did not succeed
+#   - the tap repo does not exist yet (404)
+#   - the HOMEBREW_TAP_TOKEN secret is not configured
+#
+# This keeps `git tag v...` cuttable even before the tap is bootstrapped.
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+jobs:
+  update-tap:
+    name: Bump Homebrew cask
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    timeout-minutes: 15
+
+    env:
+      TAP_OWNER: launchapp-dev
+      TAP_REPO: homebrew-tap
+      CASK_PATH: Casks/animus.rb
+
+    steps:
+      - name: Resolve release tag and asset
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          HEAD_BRANCH="${{ github.event.workflow_run.head_branch }}"
+          if [[ -z "$HEAD_BRANCH" || "$HEAD_BRANCH" != v* ]]; then
+            echo "::notice::Release workflow was not triggered by a v* tag (saw '$HEAD_BRANCH'). Skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          TAG="$HEAD_BRANCH"
+          VERSION="${TAG#v}"
+          ASSET_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/Animus.app.tar.gz"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "asset_url=$ASSET_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Probe Homebrew tap repo
+        id: probe
+        if: steps.resolve.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${TAP_OWNER}/${TAP_REPO}")
+          if [[ "$STATUS" != "200" ]]; then
+            echo "::notice::Tap repo ${TAP_OWNER}/${TAP_REPO} not reachable (HTTP $STATUS). Skipping update. Bootstrap it from homebrew/animus.rb.template once and rerun."
+            echo "tap_ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "tap_ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify Homebrew token availability
+        id: token-check
+        if: steps.resolve.outputs.skip != 'true' && steps.probe.outputs.tap_ready == 'true'
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [[ -z "${HOMEBREW_TAP_TOKEN:-}" ]]; then
+            echo "::notice::HOMEBREW_TAP_TOKEN secret not configured. Skipping tap update; the cask can still be bumped manually."
+            echo "have_token=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "have_token=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download release asset and compute SHA256
+        id: sha
+        if: steps.resolve.outputs.skip != 'true' && steps.probe.outputs.tap_ready == 'true' && steps.token-check.outputs.have_token == 'true'
+        run: |
+          set -euo pipefail
+          ASSET_URL="${{ steps.resolve.outputs.asset_url }}"
+          TMP="$(mktemp -d)"
+          curl -fsSL -o "$TMP/Animus.app.tar.gz" "$ASSET_URL"
+          SHA="$(shasum -a 256 "$TMP/Animus.app.tar.gz" | awk '{print $1}')"
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout Homebrew tap
+        if: steps.resolve.outputs.skip != 'true' && steps.probe.outputs.tap_ready == 'true' && steps.token-check.outputs.have_token == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TAP_OWNER }}/${{ env.TAP_REPO }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Update cask file
+        id: bump
+        if: steps.resolve.outputs.skip != 'true' && steps.probe.outputs.tap_ready == 'true' && steps.token-check.outputs.have_token == 'true'
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+          SHA256: ${{ steps.sha.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          FILE="tap/${CASK_PATH}"
+          if [[ ! -f "$FILE" ]]; then
+            echo "::notice::Cask file $FILE not present in tap. Copy homebrew/animus.rb.template to ${CASK_PATH} once, then rerun."
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Replace version "..." and sha256 "..." lines. Keep everything else intact.
+          python3 - <<'PY'
+          import os, re, pathlib
+          path = pathlib.Path(os.environ["FILE"])
+          text = path.read_text()
+          text = re.sub(r'version\s+"[^"]*"', f'version "{os.environ["VERSION"]}"', text, count=1)
+          text = re.sub(r'sha256\s+"[^"]*"', f'sha256 "{os.environ["SHA256"]}"', text, count=1)
+          path.write_text(text)
+          PY
+          echo "updated=true" >> "$GITHUB_OUTPUT"
+
+      - name: Open pull request against tap
+        if: steps.bump.outputs.updated == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+        working-directory: tap
+        run: |
+          set -euo pipefail
+          BRANCH="bump/animus-${VERSION}"
+          git config user.name  "animus-release-bot"
+          git config user.email "release-bot@launchapp.dev"
+          git checkout -b "$BRANCH"
+          git add "${CASK_PATH}"
+          if git diff --cached --quiet; then
+            echo "::notice::No changes to commit; cask already at version ${VERSION}."
+            exit 0
+          fi
+          git commit -m "animus ${VERSION}"
+          git push -u origin "$BRANCH"
+          gh pr create \
+            --title "animus ${VERSION}" \
+            --body "Automated bump of the Animus cask to ${VERSION}. Source: ${{ github.repository }}@${TAG}." \
+            --base main \
+            --head "$BRANCH"
