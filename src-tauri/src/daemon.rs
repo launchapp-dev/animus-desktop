@@ -7,6 +7,8 @@ const INSTALL_SCRIPT_URL: &str =
     "https://raw.githubusercontent.com/launchapp-dev/animus-cli/main/scripts/install.sh";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, export_to = "../src/types/generated/"))]
 pub struct DaemonStatus {
     pub installed: bool,
     pub running: bool,
@@ -17,6 +19,8 @@ pub struct DaemonStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, export_to = "../src/types/generated/"))]
 pub struct InstallProgress {
     pub stage: String,
     pub percent: Option<u8>,

@@ -12,13 +12,29 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Animus",
         "width": 960,
         "height": 720,
         "minWidth": 720,
         "minHeight": 480,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "visible": true
+      },
+      {
+        "label": "popup",
+        "title": "Animus Popup",
+        "url": "index.html#/popup",
+        "width": 360,
+        "height": 520,
+        "resizable": false,
+        "decorations": false,
+        "transparent": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "focus": false
       }
     ],
     "security": {
@@ -36,7 +52,27 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "minimumSystemVersion": "12.0"
+      "minimumSystemVersion": "12.0",
+      "frameworks": [],
+      "exceptionDomain": "",
+      "providerShortName": null
+    },
+    "iOS": {},
+    "android": {},
+    "createUpdaterArtifacts": "v1Compatible"
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/launchapp-dev/animus-desktop/releases/latest/download/latest.json"
+      ],
+      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY"
+    },
+    "deep-link": {
+      "desktop": {
+        "schemes": ["animus"]
+      }
     }
   }
 }

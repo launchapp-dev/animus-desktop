@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, export_to = "../src/types/generated/"))]
 pub struct Project {
     pub id: String,
     pub repo_full_name: String,
@@ -22,6 +24,8 @@ pub struct Project {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, export_to = "../src/types/generated/"))]
 pub struct Cycle {
     pub id: String,
     pub project_id: String,
@@ -35,6 +39,8 @@ pub struct Cycle {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, export_to = "../src/types/generated/", rename_all = "lowercase"))]
 pub enum CycleStatus {
     Running,
     Passed,
@@ -43,6 +49,8 @@ pub enum CycleStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, export_to = "../src/types/generated/"))]
 pub struct Phase {
     pub name: String,
     pub status: PhaseStatus,
@@ -56,6 +64,8 @@ pub struct Phase {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, export_to = "../src/types/generated/", rename_all = "lowercase"))]
 pub enum PhaseStatus {
     Pending,
     Running,

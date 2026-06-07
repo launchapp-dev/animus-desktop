@@ -2,10 +2,13 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, Submenu, SubmenuBuilder};
-use tauri::tray::{TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Listener, Manager, Wry};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{
+    AppHandle, Emitter, Listener, LogicalPosition, Manager, PhysicalPosition, WebviewWindow, Wry,
+};
 
 const TRAY_ID: &str = "animus-desktop-tray";
+const POPUP_LABEL: &str = "popup";
 const TITLE_RUNNING: &str = "● Animus";
 const TITLE_DOWN: &str = "✕ Animus";
 const TITLE_MISSING: &str = "○ Animus";
@@ -16,6 +19,10 @@ const MENU_ID_NO_BUILDS: &str = "no-builds";
 const MENU_ID_SHOW: &str = "show-window";
 const MENU_ID_QUIT: &str = "quit";
 const MENU_ID_BUILD_PREFIX: &str = "build-";
+
+const POPUP_WIDTH: f64 = 360.0;
+const POPUP_HEIGHT: f64 = 520.0;
+const POPUP_EDGE_PADDING: f64 = 8.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -85,10 +92,21 @@ pub fn setup(app: &mut tauri::App) -> tauri::Result<()> {
     let _tray = TrayIconBuilder::with_id(TRAY_ID)
         .title(DaemonStatus::Down.title())
         .menu(&menu)
-        .show_menu_on_left_click(true)
+        // Left-click pops up our window; right-click shows the native menu.
+        .show_menu_on_left_click(false)
         .on_menu_event(handle_menu_event)
         .on_tray_icon_event(handle_tray_event)
         .build(app)?;
+
+    // Hide popup on blur (standard menubar UX).
+    if let Some(popup) = app.get_webview_window(POPUP_LABEL) {
+        let popup_clone = popup.clone();
+        popup.on_window_event(move |event| {
+            if matches!(event, tauri::WindowEvent::Focused(false)) {
+                let _ = popup_clone.hide();
+            }
+        });
+    }
 
     let handle = app.handle().clone();
     app.listen("daemon-status-changed", move |event| {
@@ -218,7 +236,80 @@ fn handle_menu_event(handle: &AppHandle, event: tauri::menu::MenuEvent) {
     }
 }
 
-fn handle_tray_event(_tray: &tauri::tray::TrayIcon, _event: TrayIconEvent) {}
+fn handle_tray_event(tray: &tauri::tray::TrayIcon, event: TrayIconEvent) {
+    if let TrayIconEvent::Click {
+        button,
+        button_state,
+        rect,
+        ..
+    } = event
+    {
+        if button == MouseButton::Left && button_state == MouseButtonState::Up {
+            let app = tray.app_handle().clone();
+            if let Some(popup) = app.get_webview_window(POPUP_LABEL) {
+                let scale = popup.scale_factor().unwrap_or(1.0);
+                let pos = rect.position.to_physical::<f64>(scale);
+                let size = rect.size.to_physical::<f64>(scale);
+                toggle_popup(&popup, pos, size);
+            }
+        }
+    }
+}
+
+fn toggle_popup(
+    window: &WebviewWindow,
+    tray_pos: PhysicalPosition<f64>,
+    tray_size: tauri::PhysicalSize<f64>,
+) {
+    if window.is_visible().unwrap_or(false) {
+        let _ = window.hide();
+        return;
+    }
+    if let Err(e) = position_popup_under_tray(window, tray_pos, tray_size) {
+        eprintln!("tray: failed to position popup: {e}");
+    }
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+fn position_popup_under_tray(
+    window: &WebviewWindow,
+    tray_pos: PhysicalPosition<f64>,
+    tray_size: tauri::PhysicalSize<f64>,
+) -> tauri::Result<()> {
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let tray_center_x_logical = (tray_pos.x + tray_size.width / 2.0) / scale;
+    let tray_bottom_y_logical = (tray_pos.y + tray_size.height) / scale;
+
+    let mut x = tray_center_x_logical - (POPUP_WIDTH / 2.0);
+    let mut y = tray_bottom_y_logical + POPUP_EDGE_PADDING;
+
+    if let Some(monitor) = window.current_monitor()? {
+        let m_pos = monitor.position();
+        let m_size = monitor.size();
+        let m_scale = monitor.scale_factor();
+        let m_x = m_pos.x as f64 / m_scale;
+        let m_y = m_pos.y as f64 / m_scale;
+        let m_w = m_size.width as f64 / m_scale;
+        let m_h = m_size.height as f64 / m_scale;
+
+        if x + POPUP_WIDTH > m_x + m_w - POPUP_EDGE_PADDING {
+            x = m_x + m_w - POPUP_WIDTH - POPUP_EDGE_PADDING;
+        }
+        if x < m_x + POPUP_EDGE_PADDING {
+            x = m_x + POPUP_EDGE_PADDING;
+        }
+        if y + POPUP_HEIGHT > m_y + m_h - POPUP_EDGE_PADDING {
+            y = m_y + m_h - POPUP_HEIGHT - POPUP_EDGE_PADDING;
+        }
+        if y < m_y + POPUP_EDGE_PADDING {
+            y = m_y + POPUP_EDGE_PADDING;
+        }
+    }
+
+    window.set_position(LogicalPosition::new(x, y))?;
+    Ok(())
+}
 
 fn focus_main_window(handle: &AppHandle) {
     if let Some(window) = handle.get_webview_window("main") {
@@ -238,4 +329,3 @@ fn emit_build_selected(handle: &AppHandle, idx: usize) {
         let _ = handle.emit("tray-build-selected", entry);
     }
 }
-

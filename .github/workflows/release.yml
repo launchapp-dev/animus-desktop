@@ -1,0 +1,146 @@
+name: Release
+
+# Triggered by pushing a semver tag, e.g. `git tag v0.1.0 && git push origin v0.1.0`.
+# Builds Animus Desktop for macOS (universal binary: arm64 + x86_64), code-signs
+# with Developer ID, notarizes via Apple, staples the ticket, and publishes a
+# GitHub Release with the signed .dmg, .app.tar.gz, and `latest.json` for the
+# Tauri updater plugin.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, sign, notarize and publish
+    runs-on: macos-14
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Import Apple Developer ID certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          CERT_PATH="$RUNNER_TEMP/cert.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/animus-signing.keychain-db"
+
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security import "$CERT_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychain -d user | xargs)
+
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+      - name: Materialize App Store Connect API key
+        env:
+          APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          set -euo pipefail
+          API_KEY_DIR="$RUNNER_TEMP/appstore-key"
+          mkdir -p "$API_KEY_DIR"
+          API_KEY_FILE="$API_KEY_DIR/AuthKey_${APPLE_API_KEY}.p8"
+          echo "$APPLE_API_KEY_PATH" | base64 --decode > "$API_KEY_FILE"
+          chmod 600 "$API_KEY_FILE"
+          echo "APPLE_API_KEY_PATH_FILE=$API_KEY_FILE" >> "$GITHUB_ENV"
+
+      - name: Build, sign, notarize, publish (Tauri Action)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Tauri updater signing (signs latest.json so updater can verify).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Apple code signing identity used by Tauri bundler.
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # Notarization via App Store Connect API key (preferred over password).
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH_FILE }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Animus ${{ github.ref_name }}"
+          releaseBody: |
+            Animus Desktop ${{ github.ref_name }}
+
+            Download the `.dmg` for a one-click installer, or use Homebrew:
+
+            ```
+            brew install --cask launchapp-dev/tap/animus
+            ```
+
+            See `docs/DISTRIBUTION.md` for details on signature verification
+            and the auto-updater channel.
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
+          # Universal binary: a single .app/.dmg that runs on both Apple Silicon
+          # and Intel Macs.
+          args: --target universal-apple-darwin
+
+      - name: Clean up signing keychain
+        if: always()
+        env:
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/animus-signing.keychain-db"
+          if [ -f "$KEYCHAIN_PATH" ]; then
+            security delete-keychain "$KEYCHAIN_PATH" || true
+          fi
+          if [ -f "$RUNNER_TEMP/cert.p12" ]; then
+            rm -f "$RUNNER_TEMP/cert.p12"
+          fi
+          if [ -d "$RUNNER_TEMP/appstore-key" ]; then
+            rm -rf "$RUNNER_TEMP/appstore-key"
+          fi
