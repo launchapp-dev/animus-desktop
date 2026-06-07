@@ -1,0 +1,30 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for Animus Desktop",
+  "windows": ["main", "popup"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-set-position",
+    "core:window:allow-set-size",
+    "core:window:allow-set-always-on-top",
+    "core:window:allow-set-skip-taskbar",
+    "core:webview:default",
+    "core:event:default",
+    "core:app:default",
+    "core:tray:default",
+    "shell:default",
+    "store:default",
+    "notification:default",
+    "updater:default",
+    "window-state:default",
+    "deep-link:default",
+    "clipboard-manager:default",
+    "autostart:default",
+    "global-shortcut:default"
+  ]
+}

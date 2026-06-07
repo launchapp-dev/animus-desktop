@@ -1,4 +1,6 @@
+mod cycle_logs;
 mod daemon;
+mod event_bridge;
 mod github;
 mod plugin;
 mod project;
@@ -11,8 +13,26 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(tauri_plugin_deep_link::init());
+
+    #[cfg(desktop)]
+    {
+        builder = builder
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .plugin(tauri_plugin_autostart::init(
+                tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+                None,
+            ))
+            .plugin(tauri_plugin_global_shortcut::Builder::new().build());
+    }
+
+    builder
         .setup(|app| {
             let app_state = tauri::async_runtime::block_on(async {
                 AppState::new()
@@ -21,6 +41,7 @@ pub fn run() {
             })?;
             app.manage(app_state);
             tray::setup(app)?;
+            event_bridge::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -46,6 +67,7 @@ pub fn run() {
             project::project_delete,
             project::project_setup_template,
             template::template_render,
+            cycle_logs::cycle_logs_subscribe,
         ])
         .run(tauri::generate_context!())
         .expect("error while running animus desktop");
