@@ -1,29 +1,113 @@
-import { useState } from "react";
+import { useEffect } from "react";
+import {
+  HashRouter,
+  Link,
+  NavLink,
+  Route,
+  Routes,
+  useLocation,
+} from "react-router-dom";
+import { useDaemonStore } from "./state/daemon";
+import { useAuthStore } from "./state/auth";
+import { ProjectList } from "./views/ProjectList";
+import { ProjectDetail } from "./views/ProjectDetail";
+import { CycleDetail } from "./views/CycleDetail";
+import { Settings } from "./views/Settings";
+import { AddProjectFlow } from "./views/AddProjectFlow";
 
-function App() {
-  const [count] = useState(0);
+function Sidebar() {
+  const daemon = useDaemonStore((s) => s.status);
+  const auth = useAuthStore((s) => s.status);
+  const location = useLocation();
+
+  const daemonTone: "ok" | "warn" | "off" = daemon?.running
+    ? "ok"
+    : daemon?.installed
+      ? "warn"
+      : "off";
+  const daemonLabel = daemon?.running
+    ? "Running"
+    : daemon?.installed
+      ? "Stopped"
+      : "Not installed";
 
   return (
-    <main className="container">
-      <header>
-        <h1>Animus</h1>
-        <p className="subtitle">The app for AI teams</p>
-      </header>
+    <aside className="sidebar">
+      <Link to="/" className="sidebar__brand">
+        <span className="brand-mark">●</span>
+        <span className="brand-text">Animus</span>
+      </Link>
 
-      <section className="status">
-        <h2>v0.0.1 — scaffold</h2>
-        <p>
-          This is the v1 build skeleton. Daemon supervisor, plugin manager,
-          GitHub OAuth, repo picker, CI/CD team template, project list, and
-          cycle drill-down are all in active development.
-        </p>
-        <p>
-          See <code>docs/ROADMAP.md</code> for the v1 scope and slice
-          ownership.
-        </p>
-        <p className="muted">Projects loaded: {count}</p>
-      </section>
-    </main>
+      <nav className="sidebar__nav">
+        <NavLink to="/" end className="nav-link">
+          Projects
+        </NavLink>
+        <NavLink
+          to="/projects/new"
+          className={`nav-link ${
+            location.pathname.startsWith("/projects/new") ? "active" : ""
+          }`}
+        >
+          Add project
+        </NavLink>
+        <NavLink to="/settings" className="nav-link">
+          Settings
+        </NavLink>
+      </nav>
+
+      <div className="sidebar__footer">
+        <div className="status-pill">
+          <span className={`status-dot status-dot--${daemonTone}`} />
+          <span className="status-pill__label">Daemon</span>
+          <span className="status-pill__value">{daemonLabel}</span>
+        </div>
+        <div className="status-pill">
+          <span
+            className={`status-dot status-dot--${auth?.logged_in ? "ok" : "off"}`}
+          />
+          <span className="status-pill__label">GitHub</span>
+          <span className="status-pill__value">
+            {auth?.logged_in ? `@${auth.login}` : "signed out"}
+          </span>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function AppShell() {
+  const refreshDaemon = useDaemonStore((s) => s.refresh);
+  const refreshAuth = useAuthStore((s) => s.refresh);
+
+  useEffect(() => {
+    void refreshDaemon();
+    void refreshAuth();
+  }, [refreshDaemon, refreshAuth]);
+
+  return (
+    <div className="app-shell">
+      <Sidebar />
+      <main className="content">
+        <Routes>
+          <Route path="/" element={<ProjectList />} />
+          <Route path="/projects/new" element={<AddProjectFlow />} />
+          <Route path="/projects/:id" element={<ProjectDetail />} />
+          <Route
+            path="/projects/:id/cycles/:cycleId"
+            element={<CycleDetail />}
+          />
+          <Route path="/settings" element={<Settings />} />
+        </Routes>
+      </main>
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <HashRouter>
+      <AppShell />
+    </HashRouter>
   );
 }
 
