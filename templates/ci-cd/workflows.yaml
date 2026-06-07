@@ -1,0 +1,77 @@
+# CI/CD team template — TypeScript reference shape
+#
+# Drops into a project at .animus/workflows.yaml. Animus daemon picks
+# it up automatically.
+#
+# Requires: Animus v0.5.3 or later, gh CLI installed and authenticated
+# on the daemon host, github_webhook plugin installed via
+# `animus plugin install-defaults`.
+#
+# Adapt the command phases for your language (see ../README.md).
+
+agents: {}
+
+phases:
+  install:
+    mode: command
+    command:
+      program: npm
+      args: [ci]
+      timeout_secs: 600
+      success_exit_codes: [0]
+
+  lint:
+    mode: command
+    command:
+      program: npm
+      args: [run, lint]
+      timeout_secs: 300
+      success_exit_codes: [0]
+
+  test:
+    mode: command
+    command:
+      program: npm
+      args: [test]
+      timeout_secs: 900
+      success_exit_codes: [0]
+
+  build:
+    mode: command
+    command:
+      program: npm
+      args: [run, build]
+      timeout_secs: 600
+      success_exit_codes: [0]
+
+  status-success:
+    mode: command
+    command:
+      program: ./scripts/gh-status-post.sh
+      args: [success]
+      timeout_secs: 60
+
+  status-failure:
+    mode: command
+    command:
+      program: ./scripts/gh-status-post.sh
+      args: [failure]
+      timeout_secs: 60
+
+workflows:
+  - id: pr-ci
+    phases:
+      - install
+      - lint
+      - test
+      - build
+      - status-success
+
+triggers:
+  - id: pr-opened
+    type: github_webhook
+    workflow_ref: pr-ci
+    enabled: true
+    config:
+      events: [pull_request]
+      actions: [opened, reopened, synchronize]
