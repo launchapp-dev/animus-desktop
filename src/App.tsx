@@ -8,6 +8,7 @@ import {
   useLocation,
 } from "react-router-dom";
 import { useHotkeys } from "react-hotkeys-hook";
+import { WindowTitlebar } from "tauri-controls";
 import { useDaemonStore } from "./state/daemon";
 import { useAuthStore } from "./state/auth";
 import { ProjectList } from "./views/ProjectList";
@@ -15,6 +16,7 @@ import { ProjectDetail } from "./views/ProjectDetail";
 import { CycleDetail } from "./views/CycleDetail";
 import { Settings } from "./views/Settings";
 import { AddProjectFlow } from "./views/AddProjectFlow";
+import { PopupView } from "./views/PopupView";
 import { CommandPalette } from "./components/CommandPalette";
 
 function Sidebar({ onOpenPalette }: { onOpenPalette: () => void }) {
@@ -35,6 +37,12 @@ function Sidebar({ onOpenPalette }: { onOpenPalette: () => void }) {
 
   return (
     <aside className="sidebar">
+      <div className="sidebar__titlebar" data-tauri-drag-region>
+        <WindowTitlebar
+          controlsOrder="left"
+          windowControlsProps={{ platform: "macos", className: "titlebar-controls" }}
+        />
+      </div>
       <Link to="/" className="sidebar__brand">
         <span className="brand-mark">●</span>
         <span className="brand-text">Animus</span>
@@ -100,6 +108,7 @@ function AppShell() {
   const refreshDaemon = useDaemonStore((s) => s.refresh);
   const refreshAuth = useAuthStore((s) => s.refresh);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const location = useLocation();
 
   useEffect(() => {
     void refreshDaemon();
@@ -116,6 +125,15 @@ function AppShell() {
     { enableOnFormTags: true, enableOnContentEditable: true },
     [],
   );
+
+  // Popup window loads index.html#/popup and skips the main app chrome.
+  if (location.pathname.startsWith("/popup")) {
+    return (
+      <Routes>
+        <Route path="/popup" element={<PopupView />} />
+      </Routes>
+    );
+  }
 
   return (
     <div className="app-shell">
