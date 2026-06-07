@@ -1,22 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { listen } from "@tauri-apps/api/event";
 import { Badge } from "../components/Badge";
 import { Spinner } from "../components/Spinner";
 import { useProjectsStore } from "../state/projects";
 import type { Phase } from "../types/contracts";
+import {
+  subscribeCycleLogs,
+  type LogLine as BackendLogLine,
+} from "../api/cycle_logs";
 
 interface LogLine {
   ts: number;
   phase: string;
   text: string;
-}
-
-interface LogPayload {
-  cycle_id?: string;
-  phase?: string;
-  line?: string;
-  text?: string;
 }
 
 function phaseDuration(phase: Phase): string {
@@ -88,31 +84,34 @@ export function CycleDetail() {
     return () => window.clearInterval(interval);
   }, [activePhase]);
 
-  // Real backend event subscription — gracefully ignored if unavailable.
   useEffect(() => {
     if (!cycleId) return;
-    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    let subscription: { close: () => void } | null = null;
     (async () => {
       try {
-        const stop = await listen<LogPayload>("cycle:log", (event) => {
-          const p = event.payload;
-          if (!p || p.cycle_id !== cycleId) return;
+        const sub = await subscribeCycleLogs(cycleId, (line: BackendLogLine) => {
           setLogLines((prev) => [
             ...prev,
             {
               ts: Date.now(),
-              phase: p.phase ?? "unknown",
-              text: p.line ?? p.text ?? "",
+              phase: line.phase ?? "unknown",
+              text: line.message,
             },
           ]);
         });
-        unlisten = stop;
+        if (cancelled) {
+          sub.close();
+        } else {
+          subscription = sub;
+        }
       } catch (e) {
-        console.warn("[CycleDetail] event listen unavailable:", e);
+        console.warn("[CycleDetail] cycle logs subscribe unavailable:", e);
       }
     })();
     return () => {
-      unlisten?.();
+      cancelled = true;
+      subscription?.close();
     };
   }, [cycleId]);
 
