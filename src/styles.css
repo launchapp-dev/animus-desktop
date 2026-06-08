@@ -35,10 +35,10 @@
   --text-muted: #c0c4cc;
   --text-faint: #8a8f99;
 
-  /* Accent moves from cool blue (every dev tool) to warm copper (only here) */
-  --accent: var(--copper);
-  --accent-hover: var(--copper-hover);
-  --accent-bg: var(--copper-bg);
+  /* Mac system accent — the standard blue every native app uses for selection */
+  --accent: #0a84ff;
+  --accent-hover: #409cff;
+  --accent-bg: rgba(10, 132, 255, 0.18);
 
   --green: #3fb950;
   --green-bg: rgba(63, 185, 80, 0.16);
@@ -1347,22 +1347,32 @@ code {
 /* Operations-bridge shell layout                                         */
 /* ====================================================================== */
 
-.bridge-shell {
+/* Mac-shell: standard 2-pane (sidebar + content) with optional right pane,
+ * driven by a real NSToolbar title bar via tauri-controls. */
+.app-titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 38px;
+  z-index: 100;
+  -webkit-app-region: drag;
+}
+
+.mac-shell {
   display: grid;
-  /* 32px top zone covers the macOS traffic-light area (Overlay title bar);
-   * the watchstrip itself is 14px and sits centered below. */
-  grid-template-rows: 32px 1fr 22px;
-  grid-template-columns: 180px 1fr auto;
+  grid-template-rows: 1fr 22px;
+  grid-template-columns: 220px 1fr 0;
   grid-template-areas:
-    "watchstrip watchstrip watchstrip"
     "rail bridge command"
     "statusbar statusbar statusbar";
   height: 100vh;
   width: 100vw;
+  padding-top: 38px;
 }
 
-.bridge-shell--no-command {
-  grid-template-columns: 180px 1fr 0;
+.mac-shell--with-command {
+  grid-template-columns: 220px 1fr 340px;
 }
 
 /* ---------- Watchstrip ---------- */
@@ -1444,7 +1454,7 @@ code {
   border-right: var(--hairline) solid var(--border);
   display: flex;
   flex-direction: column;
-  padding: 12px 6px;
+  padding: 14px 10px;
   overflow-y: auto;
 }
 
@@ -1476,29 +1486,34 @@ code {
 .rail__item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
+  gap: 9px;
+  padding: 5px 8px;
+  border-radius: 6px;
   color: var(--text);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 400;
   cursor: pointer;
-  transition: background 0.08s, color 0.08s;
+  transition: background 0.06s, color 0.06s;
   border: none;
   background: transparent;
   text-align: left;
   width: 100%;
+  min-height: 24px;
 }
 
 .rail__item:hover {
-  background: var(--bg-hover);
-  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
 }
 
-.rail__item--active {
-  color: var(--text);
-  background: transparent;
-  box-shadow: inset 2px 0 0 var(--copper);
+/* Mac system selection — solid blue tint, white text */
+.rail__item--active,
+.rail__item--active:hover {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.rail__item--active .status-dot {
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.4);
 }
 
 .rail__item-name {

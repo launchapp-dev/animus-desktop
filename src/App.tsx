@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { HashRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { useHotkeys } from "react-hotkeys-hook";
+import { WindowTitlebar } from "tauri-controls";
 import { useDaemonStore } from "./state/daemon";
 import { useAuthStore } from "./state/auth";
 import { useActiveProject } from "./state/activeProject";
 import { PopupView } from "./views/PopupView";
-import { Watchstrip } from "./components/Watchstrip";
 import { ProjectsRail } from "./components/ProjectsRail";
 import { Bridge } from "./components/Bridge";
 import { CommandPane } from "./components/CommandPane";
@@ -47,12 +47,10 @@ function AppShell() {
     [toggleCommand],
   );
 
-  // The popup window loads #/popup and renders only the popup surface.
   if (location.pathname.startsWith("/popup")) {
     return <PopupView />;
   }
 
-  // AddProject is a routed overlay so its existing wizard logic stays put.
   if (location.pathname.startsWith("/projects/new")) {
     return (
       <Routes>
@@ -63,8 +61,12 @@ function AppShell() {
 
   return (
     <>
-      <div className={`bridge-shell ${commandOpen ? "" : "bridge-shell--no-command"}`}>
-        <Watchstrip onAddProject={() => navigate("/projects/new")} />
+      <WindowTitlebar
+        controlsOrder="left"
+        windowControlsProps={{ platform: "macos" }}
+        className="app-titlebar"
+      />
+      <div className={`mac-shell ${commandOpen ? "mac-shell--with-command" : ""}`}>
         <ProjectsRail onAddProject={() => navigate("/projects/new")} />
         <Bridge />
         <CommandPane />
