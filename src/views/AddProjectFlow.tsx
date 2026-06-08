@@ -7,6 +7,7 @@ import { Spinner } from "../components/Spinner";
 import { PackCard } from "../components/PackCard";
 import { Input } from "../components/ui/input";
 import {
+  daemonStart,
   githubListRepos,
   githubRegisterWebhook,
   projectSetupTemplate,
@@ -170,10 +171,12 @@ export function AddProjectFlow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-advance from step 0 → 1 once daemon is running.
+  // Step 0 is "Animus installed?" (binary check) — auto-advance once installed.
+  // Per-project daemons are started AFTER the project is registered, not here,
+  // because daemons are per-project-root and the project root doesn't exist yet.
   useEffect(() => {
-    if (step === 0 && daemon.status?.running) setStep(1);
-  }, [step, daemon.status?.running]);
+    if (step === 0 && daemon.status?.installed) setStep(1);
+  }, [step, daemon.status?.installed]);
 
   // Auto-advance from step 1 → 2 once auth complete.
   useEffect(() => {
@@ -257,9 +260,18 @@ export function AddProjectFlow() {
       }
       const finalProject = { ...project, webhook_id: webhookId };
       addProject(finalProject);
-      if (finalProject.repo_path && finalProject.repo_path.trim().length > 0) {
+      const repoPath = finalProject.repo_path?.trim() ?? "";
+      if (repoPath.length > 0) {
+        // Start the per-project daemon. This is the right place — only now
+        // do we know the project root. Failures are non-fatal (the user can
+        // start it manually from the project page).
         try {
-          await bridgeAttachProject(finalProject.id, finalProject.repo_path);
+          await daemonStart(repoPath);
+        } catch (e) {
+          console.warn("daemon_start for new project failed:", e);
+        }
+        try {
+          await bridgeAttachProject(finalProject.id, repoPath);
         } catch (e) {
           console.warn("bridge_attach_project failed:", e);
         }
@@ -296,18 +308,19 @@ export function AddProjectFlow() {
       <div className="wizard-step">
         {step === 0 && (
           <div className="card">
-            <h2 className="card__title">Daemon</h2>
+            <h2 className="card__title">Animus</h2>
             <p className="muted small">
-              Animus runs locally. We need the daemon installed and running
-              before connecting GitHub.
+              Animus runs locally. Each project gets its own daemon — we
+              start one for this project after registration. For now we
+              just need the Animus binary installed on your machine.
             </p>
             <dl className="kv">
               <dt>Installed</dt>
               <dd>{daemon.status?.installed ? "Yes" : "No"}</dd>
-              <dt>Running</dt>
-              <dd>{daemon.status?.running ? "Yes" : "No"}</dd>
               <dt>Version</dt>
               <dd>{daemon.status?.version ?? "—"}</dd>
+              <dt>Plugins available</dt>
+              <dd>{daemon.status?.plugins_installed ?? 0}</dd>
             </dl>
             <div className="card__actions">
               {!daemon.status?.installed && (
@@ -316,19 +329,10 @@ export function AddProjectFlow() {
                   onClick={() => void daemon.install()}
                   disabled={daemon.loading}
                 >
-                  {daemon.loading ? "Installing…" : "Install daemon"}
+                  {daemon.loading ? "Installing…" : "Install Animus"}
                 </Button>
               )}
-              {daemon.status?.installed && !daemon.status.running && (
-                <Button
-                  variant="primary"
-                  onClick={() => void daemon.start()}
-                  disabled={daemon.loading}
-                >
-                  {daemon.loading ? "Starting…" : "Start daemon"}
-                </Button>
-              )}
-              {daemon.status?.running && (
+              {daemon.status?.installed && (
                 <Button variant="primary" onClick={() => setStep(1)}>
                   Continue
                 </Button>

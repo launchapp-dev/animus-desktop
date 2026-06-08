@@ -98,8 +98,10 @@ pub fn setup(app: &mut tauri::App) -> tauri::Result<()> {
         .on_tray_icon_event(handle_tray_event)
         .build(app)?;
 
-    // Hide popup on blur (standard menubar UX).
+    // Hide popup on boot (workaround for visible:false config quirk in dev)
+    // and on blur (standard menubar UX).
     if let Some(popup) = app.get_webview_window(POPUP_LABEL) {
+        let _ = popup.hide();
         let popup_clone = popup.clone();
         popup.on_window_event(move |event| {
             if matches!(event, tauri::WindowEvent::Focused(false)) {

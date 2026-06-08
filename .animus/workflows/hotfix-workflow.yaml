@@ -1,0 +1,8 @@
+workflows:
+  - id: hotfix-workflow
+    name: Hotfix Workflow
+    description: Fast-track workflow for urgent fixes.
+    phases:
+      - implementation
+      - code-review
+      - testing

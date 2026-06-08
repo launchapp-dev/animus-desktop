@@ -1,0 +1,5 @@
+default_workflow_ref: standard-workflow
+
+# Project-local workflow extensions and overrides.
+tools_allowlist:
+  - cargo

@@ -175,16 +175,22 @@ const MOCK_PROJECTS: Project[] = [
 
 // ---- Typed wrappers -------------------------------------------------------
 
-// Daemon
-export const daemonStatus = () =>
-  safeInvoke<DaemonStatus>("daemon_status", undefined, {
-    installed: false,
-    running: false,
-    version: null,
-    pid: null,
-    plugins_installed: 0,
-    binary_path: null,
-  });
+// Daemon — Animus daemons are per-project-root.
+// Pass `projectRoot` to query/start/stop a specific project's daemon.
+// Omit it for the global install check (binary exists, plugins count).
+export const daemonStatus = (projectRoot?: string) =>
+  safeInvoke<DaemonStatus>(
+    "daemon_status",
+    { projectRoot },
+    {
+      installed: false,
+      running: false,
+      version: null,
+      pid: null,
+      plugins_installed: 0,
+      binary_path: null,
+    },
+  );
 
 export const daemonInstall = () =>
   safeInvoke<DaemonStatus>("daemon_install", undefined, {
@@ -196,18 +202,22 @@ export const daemonInstall = () =>
     binary_path: "/usr/local/bin/animus",
   });
 
-export const daemonStart = () =>
-  safeInvoke<DaemonStatus>("daemon_start", undefined, {
-    installed: true,
-    running: true,
-    version: "0.5.1",
-    pid: 4242,
-    plugins_installed: 4,
-    binary_path: "/usr/local/bin/animus",
-  });
+export const daemonStart = (projectRoot?: string) =>
+  safeInvoke<DaemonStatus>(
+    "daemon_start",
+    { projectRoot },
+    {
+      installed: true,
+      running: true,
+      version: "0.5.1",
+      pid: 4242,
+      plugins_installed: 4,
+      binary_path: "/usr/local/bin/animus",
+    },
+  );
 
-export const daemonStop = () =>
-  safeInvoke<DaemonStatus>("daemon_stop", undefined, {
+export const daemonStop = (projectRoot?: string) =>
+  safeInvoke<DaemonStatus>("daemon_stop", { projectRoot }, {
     installed: true,
     running: false,
     version: "0.5.1",

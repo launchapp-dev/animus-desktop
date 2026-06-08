@@ -130,7 +130,13 @@ pub async fn plugin_list() -> Result<Vec<Plugin>, String> {
     let json: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| format!("plugin list JSON parse error: {e}"))?;
     let arr = extract_plugins_array(&json);
-    Ok(arr.iter().filter_map(parse_plugin).collect())
+    let plugins: Vec<Plugin> = arr.iter().filter_map(parse_plugin).collect();
+    eprintln!(
+        "[plugin] plugin_list -> {} entries (raw array len {})",
+        plugins.len(),
+        arr.len()
+    );
+    Ok(plugins)
 }
 
 #[tauri::command]

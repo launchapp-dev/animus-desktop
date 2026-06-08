@@ -16,6 +16,7 @@ import { CycleDetail } from "./views/CycleDetail";
 import { Settings } from "./views/Settings";
 import { AddProjectFlow } from "./views/AddProjectFlow";
 import { Chat } from "./views/Chat";
+import { PopupView } from "./views/PopupView";
 import { CommandPalette } from "./components/CommandPalette";
 
 function Sidebar({ onOpenPalette }: { onOpenPalette: () => void }) {
@@ -23,16 +24,13 @@ function Sidebar({ onOpenPalette }: { onOpenPalette: () => void }) {
   const auth = useAuthStore((s) => s.status);
   const location = useLocation();
 
-  const daemonTone: "ok" | "warn" | "off" = daemon?.running
-    ? "ok"
-    : daemon?.installed
-      ? "warn"
-      : "off";
-  const daemonLabel = daemon?.running
-    ? "Running"
-    : daemon?.installed
-      ? "Stopped"
-      : "Not installed";
+  // Animus daemons are per-project; the sidebar shows the global install
+  // state (binary + plugins count). Per-project running state lives in
+  // ProjectDetail / ProjectList.
+  const daemonTone: "ok" | "warn" | "off" = daemon?.installed ? "ok" : "off";
+  const daemonLabel = daemon?.installed
+    ? `${daemon.version ?? "Animus"} · ${daemon.plugins_installed} plugins`
+    : "Not installed";
 
   return (
     <aside className="sidebar">
@@ -104,11 +102,18 @@ function AppShell() {
   const refreshDaemon = useDaemonStore((s) => s.refresh);
   const refreshAuth = useAuthStore((s) => s.refresh);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const location = useLocation();
 
   useEffect(() => {
     void refreshDaemon();
     void refreshAuth();
   }, [refreshDaemon, refreshAuth]);
+
+  // The popup window (label="popup") loads #/popup and gets a minimal
+  // surface — no sidebar, no command palette.
+  if (location.pathname.startsWith("/popup")) {
+    return <PopupView />;
+  }
 
   // ⌘K / Ctrl+K toggles the global command palette.
   useHotkeys(
