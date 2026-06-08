@@ -15,24 +15,25 @@
   --crimson: #f0533a;
   --bone: #eee8e0;
 
-  /* Base surfaces — translucent over NSVisualEffectView vibrancy material */
+  /* Base surfaces — barely translucent so the vibrancy reads as a subtle
+   * wallpaper hint, not the dominant background. Readability first. */
   --bg: transparent;
-  --watchstrip-bg: rgba(12, 15, 20, 0.78);
-  --sidebar-bg: rgba(13, 17, 23, 0.55);
-  --content-bg: rgba(13, 17, 23, 0.85);
-  --command-pane-bg: rgba(13, 17, 23, 0.85);
-  --statusbar-bg: rgba(10, 13, 18, 0.92);
-  --bg-elevated: rgba(48, 54, 61, 0.4);
-  --bg-raised: rgba(64, 71, 79, 0.45);
-  --bg-hover: rgba(255, 255, 255, 0.06);
+  --watchstrip-bg: rgba(16, 19, 25, 0.94);
+  --sidebar-bg: rgba(16, 19, 25, 0.92);
+  --content-bg: rgba(13, 17, 23, 0.95);
+  --command-pane-bg: rgba(13, 17, 23, 0.95);
+  --statusbar-bg: rgba(12, 15, 20, 0.96);
+  --bg-elevated: rgba(36, 41, 49, 0.92);
+  --bg-raised: rgba(48, 54, 61, 0.94);
+  --bg-hover: rgba(255, 255, 255, 0.08);
 
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.14);
+  --border: rgba(255, 255, 255, 0.10);
+  --border-strong: rgba(255, 255, 255, 0.18);
   --hairline: 0.5px;
 
-  --text: var(--bone);
-  --text-muted: #9aa0a8;
-  --text-faint: #6e7480;
+  --text: #f0ece4;
+  --text-muted: #c0c4cc;
+  --text-faint: #8a8f99;
 
   /* Accent moves from cool blue (every dev tool) to warm copper (only here) */
   --accent: var(--copper);
@@ -59,11 +60,11 @@
 
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   --font-mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-  --font-display: "JetBrains Mono", "SF Mono", monospace;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
 
   font-family: var(--font-sans);
-  font-size: 12.5px;
-  line-height: 1.42;
+  font-size: 13.5px;
+  line-height: 1.5;
   color: var(--text);
   background-color: var(--bg);
 
@@ -1457,28 +1458,30 @@ code {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 8px 4px;
-  font-size: var(--section-label-size);
+  padding: 6px 10px 6px;
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: var(--section-label-tracking);
+  letter-spacing: 0.06em;
   color: var(--text-faint);
 }
 
 .rail__section-badge {
   font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 400;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
 }
 
 .rail__item {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 4px 8px;
+  gap: 8px;
+  padding: 6px 10px;
   border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  font-size: 12px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
   transition: background 0.08s, color 0.08s;
   border: none;
@@ -1541,13 +1544,13 @@ code {
 
 .bridge__title {
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: 18px;
   font-weight: 600;
-  letter-spacing: 0;
+  letter-spacing: -0.01em;
   color: var(--text);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .bridge__title-meta {
@@ -1568,12 +1571,12 @@ code {
   background: transparent;
   border: none;
   color: var(--text-muted);
-  font-family: var(--font-display);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  padding: 6px 12px 8px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 8px 14px 10px;
   cursor: pointer;
   position: relative;
   transition: color 0.08s;
@@ -1660,10 +1663,10 @@ code {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 12px;
-  font-size: 11px;
+  padding: 0 14px;
+  font-size: 12px;
   color: var(--text-muted);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
 }
 
 .statusbar__group {
