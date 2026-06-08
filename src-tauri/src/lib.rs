@@ -46,6 +46,28 @@ pub fn run() {
             app.manage(app_state);
             tray::setup(app)?;
             event_bridge::start(app.handle().clone());
+
+            #[cfg(target_os = "macos")]
+            {
+                use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = apply_vibrancy(
+                        &window,
+                        NSVisualEffectMaterial::Sidebar,
+                        Some(NSVisualEffectState::Active),
+                        None,
+                    );
+                }
+                if let Some(popup) = app.get_webview_window("popup") {
+                    let _ = apply_vibrancy(
+                        &popup,
+                        NSVisualEffectMaterial::HudWindow,
+                        Some(NSVisualEffectState::Active),
+                        None,
+                    );
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
