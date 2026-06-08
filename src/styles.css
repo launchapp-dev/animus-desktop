@@ -1348,7 +1348,9 @@ code {
 
 .bridge-shell {
   display: grid;
-  grid-template-rows: 14px 1fr 22px;
+  /* 32px top zone covers the macOS traffic-light area (Overlay title bar);
+   * the watchstrip itself is 14px and sits centered below. */
+  grid-template-rows: 32px 1fr 22px;
   grid-template-columns: 180px 1fr auto;
   grid-template-areas:
     "watchstrip watchstrip watchstrip"
@@ -1370,9 +1372,8 @@ code {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 0 8px;
-  /* macOS Overlay title bar leaves 28px reserved at the top; we tuck the
-   * watchstrip just below the traffic lights. */
+  /* Left padding reserves space for the macOS traffic lights overlay. */
+  padding: 0 8px 0 84px;
   -webkit-app-region: drag;
 }
 
