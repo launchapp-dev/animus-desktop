@@ -9,6 +9,7 @@ export type BridgeMode =
   | "mcp"
   | "files"
   | "visualize"
+  | "subjects"
   | "secrets"
   | "plugins";
 

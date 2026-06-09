@@ -11,6 +11,7 @@ import { PluginsView } from "../views/project/PluginsView";
 import { AgentsView } from "../views/project/AgentsView";
 import { McpView } from "../views/project/McpView";
 import { FilesView } from "../views/project/FilesView";
+import { SubjectsView } from "../views/project/SubjectsView";
 import { SecretsView } from "../views/project/SecretsView";
 import { JournalView } from "../views/project/JournalView";
 import { StreamView } from "../views/project/StreamView";
@@ -26,6 +27,7 @@ const MODE_TABS: { key: BridgeMode; label: string }[] = [
   { key: "agents", label: "Team" },
   { key: "mcp", label: "MCP" },
   { key: "files", label: "Files" },
+  { key: "subjects", label: "Subjects" },
   { key: "visualize", label: "Visualize" },
   { key: "secrets", label: "Secrets" },
   { key: "plugins", label: "Plugins" },
@@ -135,6 +137,8 @@ function ProjectModeContent({
       return <McpView project={project} />;
     case "files":
       return <FilesView project={project} />;
+    case "subjects":
+      return <SubjectsView project={project} />;
     case "visualize":
       return <VisualizeView project={project} />;
     case "secrets":
