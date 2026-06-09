@@ -18,12 +18,16 @@
     "core:app:default",
     "core:tray:default",
     "shell:default",
+    "shell:allow-open",
     "store:default",
     "notification:default",
     "updater:default",
     "window-state:default",
     "deep-link:default",
     "clipboard-manager:default",
+    "clipboard-manager:allow-write-text",
+    "dialog:default",
+    "dialog:allow-open",
     "autostart:default",
     "global-shortcut:default"
   ]

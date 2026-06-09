@@ -32,3 +32,11 @@ Thumbs.db
 build/
 out/
 target/
+
+# Animus runtime task state (local; workflows + config are tracked)
+.animus/subjects/
+
+# Local agent / machine-specific (not for the repo)
+.claude/
+.mcp.json
+.animus/*.lock

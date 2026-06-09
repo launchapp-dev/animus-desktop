@@ -1,48 +1,633 @@
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, export_to = "../../src/types/generated/"))]
-pub struct ChatMessage {
-    pub id: String,
-    pub role: String,
-    pub content: String,
-    pub created_at: String,
+use serde::{Deserialize, Serialize};
+use tauri::async_runtime::JoinHandle;
+use tauri::{AppHandle, Emitter};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command;
+use tokio::sync::Mutex;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatStreamLine {
+    pub session_id: String,
+    pub raw: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, export_to = "../../src/types/generated/"))]
-pub struct ChatContext {
-    pub project_id: Option<String>,
-    pub cycle_id: Option<String>,
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatStreamEnd {
+    pub session_id: String,
+    pub exit_code: Option<i32>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct ChatManager {
+    runs: Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
+}
+
+impl ChatManager {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+fn animus_binary() -> PathBuf {
+    if let Some(home) = dirs::home_dir() {
+        let local = home.join(".local").join("bin").join("animus");
+        if local.exists() {
+            return local;
+        }
+    }
+    PathBuf::from("animus")
+}
+
+// --- Scoped-state resolution (mirror of animus `repository_scope`) ----------
+//
+// Chat conversations live on disk at `~/.animus/<repo-scope>/chat/<id>/`.
+// Reading them directly avoids spawning `animus chat list` per project — that
+// shelled-out path booted the whole CLI per call and, fanned out across every
+// project on launch, ballooned RAM (a single `chat list` once hit 10GB via a
+// metrics bug). Pure disk reads are ~instant and allocate almost nothing.
+
+/// Mirror of animus `sanitize_identifier`: lowercase alnum, runs of space/`_`/`-`
+/// collapse to a single `-`, no leading/trailing separators.
+fn sanitize_identifier(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut trailing = false;
+    for ch in value.chars() {
+        match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' => {
+                out.push(ch.to_ascii_lowercase());
+                trailing = false;
+            }
+            ' ' | '_' | '-' if !out.is_empty() && !trailing => {
+                out.push('-');
+                trailing = true;
+            }
+            _ => {}
+        }
+    }
+    if trailing {
+        out.pop();
+    }
+    out
+}
+
+/// Mirror of animus `repository_scope_for_path`: `<slug>-<12 hex>` where the hex
+/// is the first 6 bytes of sha256(canonical path).
+fn repository_scope_for_path(path: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let display = canonical.to_string_lossy();
+    let repo_name = canonical
+        .file_name()
+        .and_then(|v| v.to_str())
+        .map(sanitize_identifier)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "repo".to_string());
+    let mut hasher = Sha256::new();
+    hasher.update(display.as_bytes());
+    let d = hasher.finalize();
+    let suffix = format!(
+        "{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        d[0], d[1], d[2], d[3], d[4], d[5]
+    );
+    format!("{repo_name}-{suffix}")
+}
+
+/// Resolve `~/.animus/<scope>` for a project, mirroring animus: the
+/// hash-derived dir if it exists, else a scope whose `.project-root` marker
+/// canonicalizes to the same path (covers origin-fallback / moved scopes).
+fn scoped_state_root(project_root: &Path) -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+    let ao_root = home.join(".animus");
+    let hashed = ao_root.join(repository_scope_for_path(project_root));
+    if hashed.is_dir() {
+        return Some(hashed);
+    }
+    let canonical = project_root
+        .canonicalize()
+        .unwrap_or_else(|_| project_root.to_path_buf());
+    for entry in std::fs::read_dir(&ao_root).ok()?.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        if let Ok(content) = std::fs::read_to_string(dir.join(".project-root")) {
+            let recorded = PathBuf::from(content.trim());
+            let recorded = recorded.canonicalize().unwrap_or(recorded);
+            if recorded == canonical {
+                return Some(dir);
+            }
+        }
+    }
+    None
+}
+
+fn chat_dir_for(project_root: &Path) -> Option<PathBuf> {
+    scoped_state_root(project_root).map(|s| s.join("chat"))
+}
+
+/// Read one conversation's `meta.json` as raw JSON, or `None` if missing/bad.
+fn read_meta(conversation_dir: &Path) -> Option<serde_json::Value> {
+    let raw = std::fs::read_to_string(conversation_dir.join("meta.json")).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatRunArgs {
+    pub session_id: String,
+    pub repo_path: String,
+    pub tool: String,
+    pub model: Option<String>,
+    pub prompt: String,
+    /// Conversation id to continue (multi-turn). Omit to start a new one;
+    /// the `turn_started` frame reports the generated id.
+    pub conversation_id: Option<String>,
+    pub timeout_secs: Option<u64>,
+}
+
+/// Spawn `animus chat send` (v0.5.10+ multi-turn) and stream its JSON event
+/// lines to the frontend as `chat-stream` events tagged with the session id.
+/// Conversation continuity is owned by the CLI — pass `conversation_id` to
+/// continue a prior turn. Emits `chat-stream-end` when the process exits.
+#[tauri::command]
+pub async fn chat_agent_run(
+    app: AppHandle,
+    manager: tauri::State<'_, ChatManager>,
+    args: ChatRunArgs,
+) -> Result<(), String> {
+    let bin = animus_binary();
+    let repo = PathBuf::from(args.repo_path.trim());
+    if !repo.is_dir() {
+        return Err(format!("project path not found: {}", repo.display()));
+    }
+
+    let session_id = args.session_id.clone();
+    let app_for_task = app.clone();
+
+    let mut cmd = Command::new(&bin);
+    cmd.arg("chat")
+        .arg("send")
+        .arg("--project-root")
+        .arg(&repo)
+        .arg("--tool")
+        .arg(&args.tool)
+        .arg("--stream")
+        .arg("--json");
+    if let Some(conv) = args.conversation_id.as_deref() {
+        if !conv.trim().is_empty() {
+            cmd.arg("--conversation").arg(conv);
+        }
+    }
+    if let Some(model) = args.model.as_deref() {
+        if !model.trim().is_empty() {
+            cmd.arg("--model").arg(model);
+        }
+    }
+    // Positional message arg comes last.
+    cmd.arg(&args.prompt);
+    cmd.stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+
+    let handle = tauri::async_runtime::spawn(async move {
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = app_for_task.emit(
+                    "chat-stream-end",
+                    &ChatStreamEnd {
+                        session_id: session_id.clone(),
+                        exit_code: None,
+                        error: Some(format!("spawn failed: {e}")),
+                    },
+                );
+                return;
+            }
+        };
+        let stdout = match child.stdout.take() {
+            Some(s) => s,
+            None => {
+                let _ = app_for_task.emit(
+                    "chat-stream-end",
+                    &ChatStreamEnd {
+                        session_id: session_id.clone(),
+                        exit_code: None,
+                        error: Some("no stdout".to_string()),
+                    },
+                );
+                return;
+            }
+        };
+        let stderr = child.stderr.take();
+        let mut reader = BufReader::new(stdout).lines();
+
+        loop {
+            match reader.next_line().await {
+                Ok(Some(line)) => {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    let _ = app_for_task.emit(
+                        "chat-stream",
+                        &ChatStreamLine {
+                            session_id: session_id.clone(),
+                            raw: trimmed.to_string(),
+                        },
+                    );
+                }
+                Ok(None) => break,
+                Err(_) => break,
+            }
+        }
+
+        let status = child.wait().await.ok();
+        let mut err_text: Option<String> = None;
+        if let Some(mut se) = stderr {
+            use tokio::io::AsyncReadExt;
+            let mut buf = String::new();
+            let _ = se.read_to_string(&mut buf).await;
+            let t = buf.trim();
+            if !t.is_empty() {
+                err_text = Some(t.to_string());
+            }
+        }
+        let _ = app_for_task.emit(
+            "chat-stream-end",
+            &ChatStreamEnd {
+                session_id: session_id.clone(),
+                exit_code: status.and_then(|s| s.code()),
+                error: err_text,
+            },
+        );
+    });
+
+    manager.runs.lock().await.insert(args.session_id.clone(), handle);
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn chat_send(
-    user_message: String,
-    context: Option<ChatContext>,
-) -> Result<ChatMessage, String> {
-    let project_hint = context
-        .as_ref()
-        .and_then(|c| c.project_id.as_ref())
-        .map(|id| format!(" (project: {id})"))
-        .unwrap_or_default();
+pub async fn chat_cancel(
+    manager: tauri::State<'_, ChatManager>,
+    session_id: String,
+) -> Result<(), String> {
+    if let Some(handle) = manager.runs.lock().await.remove(&session_id) {
+        handle.abort();
+    }
+    Ok(())
+}
 
-    let body = format!(
-        "Chat backend stub — provider plugin wire-up is the next \
-         commit.{project_hint}\n\nYou said: \"{user_message}\"\n\n\
-         Once wired, this agent will have read-only access to projects, \
-         cycles, daemon status, and plugin list via the existing Tauri \
-         commands, and will be able to suggest actions (open project, \
-         restart daemon, view logs) the user can confirm.",
-    );
+async fn run_chat_json(repo: &PathBuf, args: &[&str]) -> Result<serde_json::Value, String> {
+    let bin = animus_binary();
+    let mut cmd = Command::new(&bin);
+    cmd.arg("chat");
+    for a in args {
+        cmd.arg(a);
+    }
+    cmd.arg("--json").arg("--project-root").arg(repo);
+    let out = cmd
+        .output()
+        .await
+        .map_err(|e| format!("animus chat failed: {e}"))?;
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    let v: serde_json::Value =
+        serde_json::from_str(text.trim()).map_err(|e| format!("parse chat json: {e}"))?;
+    Ok(v.get("data").cloned().unwrap_or(serde_json::Value::Null))
+}
 
-    Ok(ChatMessage {
-        id: Uuid::new_v4().to_string(),
-        role: "assistant".to_string(),
-        content: body,
-        created_at: chrono::Utc::now().to_rfc3339(),
-    })
+/// List saved conversations for the project (most-recent first).
+#[tauri::command]
+pub async fn chat_list(repo_path: String) -> Result<serde_json::Value, String> {
+    let repo = PathBuf::from(repo_path.trim());
+    if !repo.is_dir() {
+        return Err(format!("project path not found: {}", repo.display()));
+    }
+    run_chat_json(&repo, &["list"]).await
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectRef {
+    pub id: String,
+    pub name: String,
+    pub repo_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectConversation {
+    pub project_id: String,
+    pub project_name: String,
+    pub id: String,
+    pub title: Option<String>,
+    pub tool: String,
+    pub model: Option<String>,
+    pub message_count: u64,
+    pub updated_at: Option<String>,
+}
+
+/// Aggregate saved conversations across every adopted project, newest first.
+/// Reads each project's scoped `chat/*/meta.json` directly from disk — no
+/// subprocess, so fanning out across many projects costs ~nothing.
+#[tauri::command]
+pub async fn chat_list_all(
+    projects: Vec<ProjectRef>,
+) -> Result<Vec<ProjectConversation>, String> {
+    let mut out: Vec<ProjectConversation> = Vec::new();
+    for p in projects {
+        let repo = PathBuf::from(p.repo_path.trim());
+        let Some(chat_dir) = chat_dir_for(&repo) else {
+            continue;
+        };
+        let Ok(read) = std::fs::read_dir(&chat_dir) else {
+            continue;
+        };
+        for entry in read.flatten() {
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let Some(meta) = read_meta(&entry.path()) else {
+                continue;
+            };
+            let Some(id) = meta.get("id").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            out.push(ProjectConversation {
+                project_id: p.id.clone(),
+                project_name: p.name.clone(),
+                id: id.to_string(),
+                title: meta.get("title").and_then(|v| v.as_str()).map(String::from),
+                tool: meta
+                    .get("tool")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("claude")
+                    .to_string(),
+                model: meta.get("model").and_then(|v| v.as_str()).map(String::from),
+                message_count: meta
+                    .get("message_count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+                updated_at: meta
+                    .get("updated_at")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+            });
+        }
+    }
+    // newest first
+    out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    Ok(out)
+}
+
+/// Conversation ids become directory names — reject path separators and other
+/// surprises before joining into a filesystem path (mirror of animus).
+fn is_safe_conversation_id(id: &str) -> bool {
+    !id.is_empty()
+        && id != "."
+        && id != ".."
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// Read `messages.jsonl` as an array of raw message objects. Size-guarded so a
+/// pathological file can never be loaded whole (same lesson as the metrics bug).
+fn read_messages(path: &Path) -> Vec<serde_json::Value> {
+    const MAX_BYTES: u64 = 64 * 1024 * 1024;
+    if std::fs::metadata(path).map(|m| m.len()).unwrap_or(0) > MAX_BYTES {
+        return Vec::new();
+    }
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    raw.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .collect()
+}
+
+/// Full transcript for one conversation, read directly from the scoped chat
+/// directory (no subprocess). Returns `{ meta, messages }`, where each message
+/// carries the persisted `blocks` timeline when present.
+#[tauri::command]
+pub async fn chat_get(
+    repo_path: String,
+    conversation_id: String,
+) -> Result<serde_json::Value, String> {
+    let repo = PathBuf::from(repo_path.trim());
+    if !is_safe_conversation_id(&conversation_id) {
+        return Err(format!("invalid conversation id: {conversation_id}"));
+    }
+    let chat_dir = chat_dir_for(&repo)
+        .ok_or_else(|| "could not resolve scoped chat directory".to_string())?;
+    let conv_dir = chat_dir.join(&conversation_id);
+    let meta = read_meta(&conv_dir)
+        .ok_or_else(|| format!("conversation '{conversation_id}' not found"))?;
+    let messages = read_messages(&conv_dir.join("messages.jsonl"));
+    Ok(serde_json::json!({ "meta": meta, "messages": messages }))
+}
+
+/// Set (or clear) a conversation's `title` in its `meta.json`, preserving every
+/// other field. A blank title clears it back to `null`. Written atomically.
+fn set_meta_title(conv_dir: &Path, title: Option<&str>) -> Result<(), String> {
+    let mut meta = read_meta(conv_dir).ok_or_else(|| "conversation not found".to_string())?;
+    let obj = meta
+        .as_object_mut()
+        .ok_or_else(|| "meta.json is not a JSON object".to_string())?;
+    let value = match title {
+        Some(t) if !t.trim().is_empty() => serde_json::Value::String(t.trim().to_string()),
+        _ => serde_json::Value::Null,
+    };
+    obj.insert("title".to_string(), value);
+    let body = serde_json::to_string_pretty(&meta).map_err(|e| e.to_string())?;
+    let meta_path = conv_dir.join("meta.json");
+    let tmp = meta_path.with_extension("json.tmp");
+    std::fs::write(&tmp, body.as_bytes()).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &meta_path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Rename a conversation (sets `meta.json` title). Blank clears it.
+#[tauri::command]
+pub async fn chat_rename(
+    repo_path: String,
+    conversation_id: String,
+    title: String,
+) -> Result<(), String> {
+    let repo = PathBuf::from(repo_path.trim());
+    if !is_safe_conversation_id(&conversation_id) {
+        return Err(format!("invalid conversation id: {conversation_id}"));
+    }
+    let chat_dir = chat_dir_for(&repo)
+        .ok_or_else(|| "could not resolve scoped chat directory".to_string())?;
+    let conv_dir = chat_dir.join(&conversation_id);
+    if !conv_dir.is_dir() {
+        return Err(format!("conversation '{conversation_id}' not found"));
+    }
+    set_meta_title(&conv_dir, Some(&title))
+}
+
+/// Permanently delete a conversation (removes its scoped directory).
+#[tauri::command]
+pub async fn chat_delete(repo_path: String, conversation_id: String) -> Result<(), String> {
+    let repo = PathBuf::from(repo_path.trim());
+    if !is_safe_conversation_id(&conversation_id) {
+        return Err(format!("invalid conversation id: {conversation_id}"));
+    }
+    let chat_dir = chat_dir_for(&repo)
+        .ok_or_else(|| "could not resolve scoped chat directory".to_string())?;
+    let conv_dir = chat_dir.join(&conversation_id);
+    if !conv_dir.is_dir() {
+        return Err(format!("conversation '{conversation_id}' not found"));
+    }
+    std::fs::remove_dir_all(&conv_dir).map_err(|e| format!("delete failed: {e}"))?;
+    Ok(())
+}
+
+/// List provider plugins (kind=provider) and a sensible set of known models
+/// per provider so the Chat composer can offer a picker.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderOption {
+    pub tool: String,
+    pub name: String,
+    pub installed: bool,
+    pub models: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn chat_providers() -> Result<Vec<ProviderOption>, String> {
+    // Query installed plugins, filter to provider kind, map plugin name to a
+    // CLI tool token. Known model lists are curated client-side fallbacks.
+    let bin = animus_binary();
+    let output = Command::new(&bin)
+        .arg("plugin")
+        .arg("list")
+        .arg("--json")
+        .output()
+        .await
+        .map_err(|e| format!("plugin list failed: {e}"))?;
+    let text = String::from_utf8_lossy(&output.stdout).to_string();
+    let json: serde_json::Value = serde_json::from_str(text.trim()).unwrap_or(serde_json::Value::Null);
+
+    let mut installed_tools: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let arr = json
+        .get("data")
+        .and_then(|d| d.as_array())
+        .or_else(|| json.as_array());
+    if let Some(items) = arr {
+        for item in items {
+            let kind = item.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+            if kind != "provider" {
+                continue;
+            }
+            let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            // animus-provider-claude -> claude
+            if let Some(tool) = name.strip_prefix("animus-provider-") {
+                installed_tools.insert(tool.to_string());
+            }
+        }
+    }
+
+    let catalog: Vec<(&str, &str, Vec<&str>)> = vec![
+        (
+            "claude",
+            "Claude",
+            vec![
+                "claude-opus-4-8",
+                "claude-opus-4-7",
+                "claude-sonnet-4-6",
+                "claude-haiku-4-5",
+            ],
+        ),
+        (
+            "codex",
+            "Codex",
+            vec!["gpt-5.5", "gpt-5.4", "gpt-5.3-codex", "gpt-5.4-mini"],
+        ),
+        (
+            "gemini",
+            "Gemini",
+            vec!["gemini-3.1-pro-preview", "gemini-2.5-flash"],
+        ),
+        ("opencode", "OpenCode", vec![]),
+        (
+            "oai",
+            "OpenAI",
+            vec!["gpt-5.5", "gpt-5.5-pro", "gpt-5.4", "gpt-5.4-mini", "o3"],
+        ),
+    ];
+
+    let mut out = Vec::new();
+    for (tool, name, models) in catalog {
+        out.push(ProviderOption {
+            tool: tool.to_string(),
+            name: name.to_string(),
+            installed: installed_tools.contains(tool),
+            models: models.into_iter().map(String::from).collect(),
+        });
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_identifier_mirrors_animus() {
+        assert_eq!(sanitize_identifier("Repo Name"), "repo-name");
+        assert_eq!(sanitize_identifier("___"), "");
+        assert_eq!(sanitize_identifier("A__B--C"), "a-b-c");
+        assert_eq!(sanitize_identifier("  __My Repo!! -- 2026__  "), "my-repo-2026");
+        assert_eq!(sanitize_identifier("日本語"), "");
+    }
+
+    #[test]
+    fn repository_scope_emits_slug_and_12_hex() {
+        let scope = repository_scope_for_path(&std::env::temp_dir());
+        let (slug, suffix) = scope.rsplit_once('-').expect("scope has a hyphen");
+        assert!(!slug.is_empty());
+        assert_eq!(suffix.len(), 12);
+        assert!(suffix.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+    }
+
+    #[test]
+    fn is_safe_conversation_id_rejects_traversal() {
+        assert!(is_safe_conversation_id("conv-abc123"));
+        assert!(is_safe_conversation_id("my_conv-1"));
+        assert!(!is_safe_conversation_id(""));
+        assert!(!is_safe_conversation_id(".."));
+        assert!(!is_safe_conversation_id("../etc"));
+        assert!(!is_safe_conversation_id("a/b"));
+    }
+
+    #[test]
+    fn set_meta_title_sets_clears_and_preserves_other_fields() {
+        let base = std::env::temp_dir().join(format!("animus-chat-rename-{}", std::process::id()));
+        let conv = base.join("conv-x");
+        std::fs::create_dir_all(&conv).unwrap();
+        std::fs::write(
+            conv.join("meta.json"),
+            r#"{"id":"conv-x","tool":"codex","message_count":3,"title":null}"#,
+        )
+        .unwrap();
+
+        set_meta_title(&conv, Some("  My chat  ")).unwrap();
+        let meta = read_meta(&conv).unwrap();
+        assert_eq!(meta.get("title").unwrap(), "My chat", "trimmed title set");
+        assert_eq!(meta.get("tool").unwrap(), "codex", "other fields preserved");
+        assert_eq!(meta.get("message_count").unwrap(), 3);
+
+        set_meta_title(&conv, Some("   ")).unwrap();
+        assert!(read_meta(&conv).unwrap().get("title").unwrap().is_null(), "blank clears title");
+
+        std::fs::remove_dir_all(&base).ok();
+    }
 }

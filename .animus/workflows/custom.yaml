@@ -1,5 +1,15 @@
 default_workflow_ref: standard-workflow
 
 # Project-local workflow extensions and overrides.
+# animus-desktop is a Tauri app: pnpm/vitest frontend + cargo (Rust) backend.
 tools_allowlist:
   - cargo
+  - rustc
+  - pnpm
+  - npm
+  - npx
+  - node
+  - git
+  - gh
+  - tsc
+  - vite

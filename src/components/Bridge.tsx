@@ -1,18 +1,74 @@
-import { useEffect } from "react";
+import { type ReactNode } from "react";
+import { SidebarTrigger } from "./ui/sidebar";
 import { useProjectsStore } from "../state/projects";
 import { useActiveProject, type BridgeMode } from "../state/activeProject";
-import { Chat } from "../views/Chat";
+import { useDaemonStore } from "../state/daemon";
 import { ProjectList } from "../views/ProjectList";
 import { Settings } from "../views/Settings";
+import { WorkflowsView } from "../views/project/WorkflowsView";
+import { VisualizeView } from "../views/project/VisualizeView";
+import { PluginsView } from "../views/project/PluginsView";
+import { AgentsView } from "../views/project/AgentsView";
+import { McpView } from "../views/project/McpView";
+import { SecretsView } from "../views/project/SecretsView";
+import { JournalView } from "../views/project/JournalView";
+import { StreamView } from "../views/project/StreamView";
+import { ChatView } from "../views/project/ChatView";
+import type { Project } from "../types/contracts";
+import { useEffect } from "react";
 
 const MODE_TABS: { key: BridgeMode; label: string }[] = [
+  { key: "chat", label: "Chat" },
   { key: "journal", label: "Journal" },
+  { key: "stream", label: "Stream" },
   { key: "workflows", label: "Workflows" },
+  { key: "agents", label: "Team" },
+  { key: "mcp", label: "MCP" },
+  { key: "visualize", label: "Visualize" },
   { key: "secrets", label: "Secrets" },
   { key: "plugins", label: "Plugins" },
 ];
 
-function EmptyHome() {
+function BridgeFrame({
+  title,
+  meta,
+  tabs,
+  children,
+  bodyFill,
+}: {
+  title: ReactNode;
+  meta?: ReactNode;
+  tabs?: ReactNode;
+  children: ReactNode;
+  bodyFill?: boolean;
+}) {
+  const daemon = useDaemonStore((s) => s.status);
+  return (
+    <main className="bridge">
+      <header className="bridge__header">
+        <SidebarTrigger className="size-7 -ml-1" />
+        <span className="bridge__header-sep" />
+        <h1 className="bridge__title">
+          {title}
+          {meta}
+        </h1>
+        {daemon?.installed ? (
+          <span className="bridge__header-meta-right">
+            <span>{daemon.version ?? "animus"}</span>
+            <span style={{ color: "var(--text-faint)" }}>·</span>
+            <span>{daemon.plugins_installed ?? 0} plugins</span>
+          </span>
+        ) : null}
+      </header>
+      {tabs}
+      <div className={`bridge__body ${bodyFill ? "bridge__body--fill" : ""}`}>
+        {children}
+      </div>
+    </main>
+  );
+}
+
+function EmptyHome({ onAddProject }: { onAddProject: () => void }) {
   return (
     <div
       style={{
@@ -21,7 +77,7 @@ function EmptyHome() {
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        gap: 14,
+        gap: 16,
         color: "var(--text-muted)",
         textAlign: "center",
         padding: 32,
@@ -31,75 +87,60 @@ function EmptyHome() {
         className="status-dot status-dot--ok"
         style={{ width: 12, height: 12 }}
       />
-      <h1
-        style={{
-          fontFamily: "var(--font-display)",
-          fontSize: 18,
-          fontWeight: 600,
-          color: "var(--text)",
-        }}
-      >
-        Animus
-      </h1>
-      <p style={{ fontSize: 12.5, maxWidth: 320 }}>
-        Local-first agentic CI/CD. Pick a project from the rail, or add your
-        first one to set up an agent crew.
+      <p style={{ fontSize: 13, maxWidth: 360, color: "var(--text)" }}>
+        Local-first agentic CI/CD. Add your first project to set up an agent
+        crew — point at a local folder or a GitHub repo.
       </p>
-    </div>
-  );
-}
-
-function AllAgentsView() {
-  return (
-    <div className="bridge__body">
-      <h1
+      <button
+        type="button"
+        onClick={onAddProject}
         style={{
-          fontFamily: "var(--font-display)",
+          background: "var(--accent)",
+          color: "var(--accent-fg)",
+          border: "none",
+          padding: "8px 16px",
+          borderRadius: 6,
+          fontWeight: 600,
           fontSize: 13,
-          fontWeight: 600,
-          marginBottom: 14,
+          cursor: "pointer",
         }}
       >
-        All agents
-      </h1>
-      <p style={{ color: "var(--text-muted)", fontSize: 12 }}>
-        Cross-project roster. Group by harness, project, or model.
-        (Coming next round — wiring agents_list_all)
-      </p>
+        + Add project
+      </button>
     </div>
   );
 }
 
-function PluginsView() {
-  return <Settings />;
-}
-
-function ProjectModeContent({ mode }: { mode: BridgeMode }) {
+function ProjectModeContent({
+  mode,
+  project,
+}: {
+  mode: BridgeMode;
+  project: Project;
+}) {
   switch (mode) {
+    case "chat":
+      return <ChatView project={project} />;
     case "journal":
-      return <Chat />;
+      return <JournalView project={project} />;
+    case "stream":
+      return <StreamView project={project} />;
     case "workflows":
-      return (
-        <div className="bridge__body">
-          <p style={{ color: "var(--text-muted)" }}>
-            Workflows mode — agents + workflows YAML editor lands here.
-          </p>
-        </div>
-      );
+      return <WorkflowsView project={project} />;
+    case "agents":
+      return <AgentsView project={project} />;
+    case "mcp":
+      return <McpView project={project} />;
+    case "visualize":
+      return <VisualizeView project={project} />;
     case "secrets":
-      return (
-        <div className="bridge__body">
-          <p style={{ color: "var(--text-muted)" }}>
-            Secrets &amp; env — keychain-backed UI lands here.
-          </p>
-        </div>
-      );
+      return <SecretsView project={project} />;
     case "plugins":
       return <PluginsView />;
   }
 }
 
-export function Bridge() {
+export function Bridge({ onAddProject }: { onAddProject: () => void }) {
   const projects = useProjectsStore((s) => s.projects);
   const refresh = useProjectsStore((s) => s.refresh);
   const activeId = useActiveProject((s) => s.activeProjectId);
@@ -111,77 +152,92 @@ export function Bridge() {
     void refresh();
   }, [refresh]);
 
-  // Auto-select first project on first load if nothing selected.
   useEffect(() => {
     if (!activeId && projects.length > 0) {
       setActive(projects[0]!.id);
     }
   }, [activeId, projects, setActive]);
 
-  // Welcome empty state when no projects yet
   if (!activeId) {
     if (projects.length === 0) {
       return (
-        <main className="bridge">
-          <EmptyHome />
-        </main>
+        <BridgeFrame title="Animus">
+          <EmptyHome onAddProject={onAddProject} />
+        </BridgeFrame>
       );
     }
     return (
-      <main className="bridge">
+      <BridgeFrame title="Projects">
         <ProjectList />
-      </main>
+      </BridgeFrame>
     );
   }
 
   if (activeId === "all-agents") {
     return (
-      <main className="bridge">
-        <AllAgentsView />
-      </main>
+      <BridgeFrame title="All agents">
+        <p style={{ color: "var(--text-muted)", fontSize: 12 }}>
+          Cross-project roster. Group by harness, project, or model.
+          (Coming next round — wiring agents_list_all)
+        </p>
+      </BridgeFrame>
     );
   }
 
   if (activeId === "plugins") {
     return (
-      <main className="bridge">
+      <BridgeFrame title="Plugins">
         <Settings />
-      </main>
+      </BridgeFrame>
     );
   }
 
   const project = projects.find((p) => p.id === activeId);
+  const isRunning = project?.last_cycle?.status === "running";
 
   return (
-    <main className="bridge">
-      <header className="bridge__header">
-        <h1 className="bridge__title">
-          {project?.repo_full_name ?? activeId}
-          {project?.last_cycle?.status === "running" && (
-            <span
-              className="bridge__title-meta"
-              style={{ color: "var(--blue)" }}
-            >
-              ●Running
-            </span>
-          )}
-        </h1>
-      </header>
-      <nav className="bridge__tabs" aria-label="Project modes">
-        {MODE_TABS.map((tab) => (
-          <button
-            key={tab.key}
-            type="button"
-            className={`bridge__tab ${
-              mode === tab.key ? "bridge__tab--active" : ""
-            }`}
-            onClick={() => setMode(tab.key)}
+    <BridgeFrame
+      title={project?.repo_full_name ?? activeId}
+      meta={
+        isRunning ? (
+          <span
+            className="bridge__title-meta"
+            style={{ color: "var(--blue)" }}
           >
-            {tab.label}
-          </button>
-        ))}
-      </nav>
-      <ProjectModeContent mode={mode} />
-    </main>
+            ●Running
+          </span>
+        ) : null
+      }
+      tabs={
+        <nav className="bridge__tabs" aria-label="Project modes">
+          {MODE_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              className={`bridge__tab ${
+                mode === tab.key ? "bridge__tab--active" : ""
+              }`}
+              onClick={() => setMode(tab.key)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+      }
+      bodyFill={
+        mode === "visualize" ||
+        mode === "chat" ||
+        mode === "journal" ||
+        mode === "stream"
+      }
+    >
+      {project ? (
+        <ProjectModeContent mode={mode} project={project} />
+      ) : (
+        <p style={{ color: "var(--text-muted)", fontSize: 12 }}>
+          Project record missing.
+        </p>
+      )}
+    </BridgeFrame>
   );
 }

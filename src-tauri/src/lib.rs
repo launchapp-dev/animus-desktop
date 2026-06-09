@@ -1,8 +1,12 @@
+mod agent_edit;
+mod animus_cli;
 mod chat;
 mod cycle_logs;
 mod daemon;
 mod event_bridge;
+mod event_log;
 mod github;
+mod local_folder;
 mod plugin;
 mod project;
 mod queue;
@@ -11,6 +15,7 @@ mod subject;
 mod template;
 mod tray;
 mod workflow;
+mod workflow_yaml;
 
 use state::AppState;
 use tauri::Manager;
@@ -22,6 +27,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_deep_link::init());
 
@@ -44,6 +50,7 @@ pub fn run() {
                     .map_err(|e| Box::<dyn std::error::Error>::from(e))
             })?;
             app.manage(app_state);
+            app.manage(chat::ChatManager::new());
             tray::setup(app)?;
             event_bridge::start(app.handle().clone());
 
@@ -112,7 +119,39 @@ pub fn run() {
             subject::animus_history,
             subject::logs_tail,
             subject::daemon_health,
-            chat::chat_send,
+            chat::chat_agent_run,
+            chat::chat_cancel,
+            chat::chat_providers,
+            chat::chat_list,
+            chat::chat_list_all,
+            chat::chat_get,
+            chat::chat_rename,
+            chat::chat_delete,
+            local_folder::local_folder_inspect,
+            local_folder::local_folder_git_init,
+            local_folder::project_adopt_local,
+            local_folder::local_worktrees_list,
+            local_folder::local_dir_list,
+            local_folder::local_file_read,
+            animus_cli::animus_workflow_config,
+            animus_cli::animus_workflow_list,
+            animus_cli::animus_status_get,
+            animus_cli::animus_queue_list,
+            animus_cli::animus_workflow_run,
+            animus_cli::animus_secret_list,
+            animus_cli::animus_secret_set,
+            animus_cli::animus_secret_get,
+            animus_cli::animus_secret_rm,
+            animus_cli::animus_secret_import_env,
+            animus_cli::animus_secret_export_env,
+            workflow_yaml::local_workflows_read,
+            workflow_yaml::local_workflow_file_read,
+            workflow_yaml::local_mcp_server_upsert,
+            workflow_yaml::local_mcp_link,
+            agent_edit::local_agent_update,
+            event_log::local_events_read,
+            event_log::local_workflow_runs,
+            event_log::local_run_transcript,
         ])
         .run(tauri::generate_context!())
         .expect("error while running animus desktop");
