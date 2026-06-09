@@ -10,6 +10,7 @@ import { VisualizeView } from "../views/project/VisualizeView";
 import { PluginsView } from "../views/project/PluginsView";
 import { AgentsView } from "../views/project/AgentsView";
 import { McpView } from "../views/project/McpView";
+import { FilesView } from "../views/project/FilesView";
 import { SecretsView } from "../views/project/SecretsView";
 import { JournalView } from "../views/project/JournalView";
 import { StreamView } from "../views/project/StreamView";
@@ -24,6 +25,7 @@ const MODE_TABS: { key: BridgeMode; label: string }[] = [
   { key: "workflows", label: "Workflows" },
   { key: "agents", label: "Team" },
   { key: "mcp", label: "MCP" },
+  { key: "files", label: "Files" },
   { key: "visualize", label: "Visualize" },
   { key: "secrets", label: "Secrets" },
   { key: "plugins", label: "Plugins" },
@@ -131,6 +133,8 @@ function ProjectModeContent({
       return <AgentsView project={project} />;
     case "mcp":
       return <McpView project={project} />;
+    case "files":
+      return <FilesView project={project} />;
     case "visualize":
       return <VisualizeView project={project} />;
     case "secrets":
@@ -228,7 +232,8 @@ export function Bridge({ onAddProject }: { onAddProject: () => void }) {
         mode === "visualize" ||
         mode === "chat" ||
         mode === "journal" ||
-        mode === "stream"
+        mode === "stream" ||
+        mode === "files"
       }
     >
       {project ? (

@@ -7,6 +7,7 @@ export type BridgeMode =
   | "workflows"
   | "agents"
   | "mcp"
+  | "files"
   | "visualize"
   | "secrets"
   | "plugins";
