@@ -121,6 +121,13 @@ function enqueueLog(
   const key = e.project_id ?? GLOBAL_BUCKET;
   const queue = pendingLogs.get(key) ?? [];
   queue.push(e);
+  // Cap at enqueue time: requestAnimationFrame doesn't fire while the window
+  // is hidden/minimized, so a daemon flood would otherwise grow this queue
+  // unboundedly until the user looks at the app again. Only the newest
+  // LOG_CAP entries survive the flush anyway.
+  if (queue.length > LOG_CAP) {
+    queue.splice(0, queue.length - LOG_CAP);
+  }
   pendingLogs.set(key, queue);
   if (flushScheduled) return;
   flushScheduled = true;

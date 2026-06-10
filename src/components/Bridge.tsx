@@ -17,7 +17,7 @@ import { JournalView } from "../views/project/JournalView";
 import { StreamView } from "../views/project/StreamView";
 import { ChatView } from "../views/project/ChatView";
 import type { Project } from "../types/contracts";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 const MODE_TABS: { key: BridgeMode; label: string }[] = [
   { key: "chat", label: "Chat" },
@@ -160,8 +160,12 @@ export function Bridge({ onAddProject }: { onAddProject: () => void }) {
     void refresh();
   }, [refresh]);
 
+  // Auto-select the first project once at startup only — re-running on every
+  // deselect would make the "all projects" list unreachable.
+  const autoSelected = useRef(false);
   useEffect(() => {
-    if (!activeId && projects.length > 0) {
+    if (!activeId && projects.length > 0 && !autoSelected.current) {
+      autoSelected.current = true;
       setActive(projects[0]!.id);
     }
   }, [activeId, projects, setActive]);
@@ -241,7 +245,10 @@ export function Bridge({ onAddProject }: { onAddProject: () => void }) {
       }
     >
       {project ? (
-        <ProjectModeContent mode={mode} project={project} />
+        // Keyed by project so EVERY per-project view remounts on switch —
+        // otherwise component state (turns, subjects, open files, runs,
+        // filters, half-filled forms) bleeds from one project into the next.
+        <ProjectModeContent key={project.id} mode={mode} project={project} />
       ) : (
         <p style={{ color: "var(--text-muted)", fontSize: 12 }}>
           Project record missing.

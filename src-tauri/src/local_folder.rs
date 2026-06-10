@@ -468,15 +468,24 @@ pub async fn local_file_read(base: String, rel: String) -> Result<FileContent, S
         return Err("path is a directory".into());
     }
     let size = meta.len();
-    let bytes = tokio::fs::read(&path)
-        .await
-        .map_err(|e| format!("read: {}", e))?;
-    let truncated = size > FILE_READ_CAP;
-    let slice = if truncated {
-        &bytes[..FILE_READ_CAP as usize]
-    } else {
-        &bytes[..]
+    // Stream at most the cap — `fs::read` would allocate the WHOLE file
+    // first (clicking an 8GB artifact meant an 8GB allocation) and only
+    // truncate afterwards.
+    let bytes = {
+        use tokio::io::AsyncReadExt;
+        let file = tokio::fs::File::open(&path)
+            .await
+            .map_err(|e| format!("open: {}", e))?;
+        let mut limited = file.take(FILE_READ_CAP);
+        let mut buf: Vec<u8> = Vec::with_capacity(FILE_READ_CAP.min(size) as usize);
+        limited
+            .read_to_end(&mut buf)
+            .await
+            .map_err(|e| format!("read: {}", e))?;
+        buf
     };
+    let truncated = size > FILE_READ_CAP;
+    let slice = &bytes[..];
     if slice.contains(&0) {
         return Ok(FileContent {
             text: None,

@@ -106,6 +106,12 @@ function AppShell() {
         if (cancelled) return;
         if (active.includes(activeProjectId)) return;
         await bridgeAttachProject(activeProjectId, repoPath);
+        // The user may have switched away while the attach was in flight —
+        // a later effect run can't see this bridge yet (it wasn't listed),
+        // so detach it ourselves or it leaks a stream subprocess.
+        if (cancelled) {
+          await bridgeDetachProject(activeProjectId).catch(() => undefined);
+        }
       } catch (e) {
         console.warn("[bridge_attach] failed:", e);
       }

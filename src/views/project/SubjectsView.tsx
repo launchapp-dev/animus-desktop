@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   subjectCreate,
   subjectDelete,
@@ -63,7 +63,13 @@ export function SubjectsView({ project }: { project: Project }) {
 
   const path = project.repo_path?.trim() || undefined;
 
+  // Last-issued-wins token: `subjectList` shells out to the animus CLI and a
+  // slow `task` listing must not resolve AFTER a fast `requirement` one and
+  // display tasks under the requirement chip (whose actions would then write
+  // against the wrong backend with the wrong ids).
+  const refreshSeq = useRef(0);
   const refresh = useCallback(async () => {
+    const seq = ++refreshSeq.current;
     if (!path) {
       setError("This project has no folder path on disk.");
       setSubjects([]);
@@ -73,6 +79,7 @@ export function SubjectsView({ project }: { project: Project }) {
     setError(null);
     try {
       const res = await subjectList(kind, path);
+      if (seq !== refreshSeq.current) return;
       if (!res.ok) {
         setError(res.error ?? "subject list failed");
         setSubjects([]);
@@ -80,7 +87,7 @@ export function SubjectsView({ project }: { project: Project }) {
         setSubjects(res.data ?? []);
       }
     } finally {
-      setLoading(false);
+      if (seq === refreshSeq.current) setLoading(false);
     }
   }, [kind, path]);
 

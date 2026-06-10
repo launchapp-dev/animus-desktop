@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import hljs from "highlight.js/lib/common";
 import {
   localWorktreesList,
   localDirList,
@@ -8,6 +9,80 @@ import {
   type FileContent,
 } from "../../api/local_folder";
 import type { Project } from "../../types/contracts";
+
+// Highlighting beyond this size is skipped — the file still renders, just plain.
+const HIGHLIGHT_CHAR_CAP = 200_000;
+
+const LANG_BY_EXT: Record<string, string> = {
+  ts: "typescript",
+  tsx: "typescript",
+  mts: "typescript",
+  cts: "typescript",
+  js: "javascript",
+  jsx: "javascript",
+  mjs: "javascript",
+  cjs: "javascript",
+  rs: "rust",
+  py: "python",
+  go: "go",
+  rb: "ruby",
+  java: "java",
+  kt: "kotlin",
+  kts: "kotlin",
+  c: "c",
+  h: "c",
+  cc: "cpp",
+  cpp: "cpp",
+  cxx: "cpp",
+  hpp: "cpp",
+  cs: "csharp",
+  php: "php",
+  swift: "swift",
+  scala: "scala",
+  sh: "bash",
+  bash: "bash",
+  zsh: "bash",
+  fish: "bash",
+  yaml: "yaml",
+  yml: "yaml",
+  json: "json",
+  jsonc: "json",
+  toml: "ini",
+  ini: "ini",
+  md: "markdown",
+  markdown: "markdown",
+  html: "xml",
+  htm: "xml",
+  xml: "xml",
+  svg: "xml",
+  vue: "xml",
+  css: "css",
+  scss: "scss",
+  sass: "scss",
+  less: "less",
+  sql: "sql",
+  graphql: "graphql",
+  gql: "graphql",
+  lua: "lua",
+  dart: "dart",
+  ex: "elixir",
+  exs: "elixir",
+};
+
+const LANG_BY_NAME: Record<string, string> = {
+  dockerfile: "dockerfile",
+  makefile: "makefile",
+  ".gitignore": "bash",
+  ".env": "bash",
+};
+
+function langForFile(name: string): string | null {
+  const lower = name.toLowerCase();
+  if (LANG_BY_NAME[lower]) return LANG_BY_NAME[lower];
+  const dot = lower.lastIndexOf(".");
+  if (dot === -1) return null;
+  return LANG_BY_EXT[lower.slice(dot + 1)] ?? null;
+}
 
 interface Root {
   key: string;
@@ -68,8 +143,13 @@ export function FilesView({ project }: { project: Project }) {
     };
     setRoots([repoRoot]);
     setActiveRootKey("repo");
+    // Cancellation guard: the worktree listing shells out to git and can
+    // resolve AFTER the repo path changed — landing the old project's roots
+    // (and base path) under the new project.
+    let cancelled = false;
     localWorktreesList(repoPath)
       .then((wts: WorktreeRoot[]) => {
+        if (cancelled) return;
         setRoots([
           repoRoot,
           ...wts.map((w) => ({
@@ -82,6 +162,9 @@ export function FilesView({ project }: { project: Project }) {
         ]);
       })
       .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [repoPath]);
 
   // Switching root resets navigation and open tabs (they belong to a base).
@@ -92,19 +175,27 @@ export function FilesView({ project }: { project: Project }) {
     setContent(null);
   }, [base]);
 
+  // Last-issued-wins tokens: two slow listings/reads in flight must not let
+  // the OLDER one resolve last and display under the newer selection.
+  const dirSeq = useRef(0);
+  const fileSeq = useRef(0);
+
   const loadDir = useCallback(
     async (dir: string) => {
       if (!base) return;
+      const seq = ++dirSeq.current;
       setLoadingDir(true);
       setListError(null);
       try {
         const list = await localDirList(base, dir);
+        if (seq !== dirSeq.current) return;
         setEntries(list);
       } catch (e) {
+        if (seq !== dirSeq.current) return;
         setListError(String(e));
         setEntries([]);
       } finally {
-        setLoadingDir(false);
+        if (seq === dirSeq.current) setLoadingDir(false);
       }
     },
     [base],
@@ -116,6 +207,7 @@ export function FilesView({ project }: { project: Project }) {
 
   const openFile = useCallback(
     async (rel: string, name: string) => {
+      const seq = ++fileSeq.current;
       setActiveTab(rel);
       setTabs((prev) => (prev.some((t) => t.rel === rel) ? prev : [...prev, { rel, name }]));
       setContentLoading(true);
@@ -123,11 +215,13 @@ export function FilesView({ project }: { project: Project }) {
       setContent(null);
       try {
         const c = await localFileRead(base, rel);
+        if (seq !== fileSeq.current) return;
         setContent(c);
       } catch (e) {
+        if (seq !== fileSeq.current) return;
         setContentError(String(e));
       } finally {
-        setContentLoading(false);
+        if (seq === fileSeq.current) setContentLoading(false);
       }
     },
     [base],
@@ -135,23 +229,39 @@ export function FilesView({ project }: { project: Project }) {
 
   const closeTab = useCallback(
     (rel: string) => {
-      setTabs((prev) => {
-        const next = prev.filter((t) => t.rel !== rel);
-        if (activeTab === rel) {
-          const fallback = next[next.length - 1] ?? null;
-          if (fallback) void openFile(fallback.rel, fallback.name);
-          else {
-            setActiveTab(null);
-            setContent(null);
-          }
+      // Keep the state updater pure (StrictMode/concurrent rendering may run
+      // it twice); do the follow-up effects outside.
+      const next = tabs.filter((t) => t.rel !== rel);
+      setTabs(next);
+      if (activeTab === rel) {
+        const fallback = next[next.length - 1] ?? null;
+        if (fallback) void openFile(fallback.rel, fallback.name);
+        else {
+          setActiveTab(null);
+          setContent(null);
         }
-        return next;
-      });
+      }
     },
-    [activeTab, openFile],
+    [tabs, activeTab, openFile],
   );
 
   const crumbs = cwd ? cwd.split("/").filter(Boolean) : [];
+
+  // Syntax-highlight the active file (skipped for very large files).
+  const highlighted = useMemo(() => {
+    const text = content?.text;
+    if (text == null || activeTab == null) return null;
+    if (text.length > HIGHLIGHT_CHAR_CAP) return null;
+    try {
+      const lang = langForFile(basename(activeTab));
+      if (lang && hljs.getLanguage(lang)) {
+        return hljs.highlight(text, { language: lang, ignoreIllegals: true }).value;
+      }
+      return hljs.highlightAuto(text).value;
+    } catch {
+      return null;
+    }
+  }, [content, activeTab]);
 
   if (!repoPath) {
     return (
@@ -316,7 +426,16 @@ export function FilesView({ project }: { project: Project }) {
                     Showing the first 1 MB of {fmtSize(content.size)}.
                   </div>
                 )}
-                <pre className="files-content__pre">{content?.text}</pre>
+                {highlighted ? (
+                  <pre className="files-content__pre">
+                    <code
+                      className="hljs"
+                      dangerouslySetInnerHTML={{ __html: highlighted }}
+                    />
+                  </pre>
+                ) : (
+                  <pre className="files-content__pre">{content?.text}</pre>
+                )}
               </>
             )}
           </div>

@@ -157,31 +157,40 @@ async fn detect_running_pid(bin: &PathBuf, project_root: Option<&str>) -> (bool,
 }
 
 async fn pgrep_animus_daemon(project_root: Option<&str>) -> (bool, Option<u32>) {
-    let pattern = match project_root {
-        Some(root) => format!("animus daemon.*{root}"),
-        None => "animus daemon".to_string(),
-    };
-    let output = match Command::new("pgrep")
-        .arg("-f")
-        .arg(&pattern)
-        .output()
-        .await
-    {
+    // List full cmdlines and filter in Rust instead of handing pgrep a regex:
+    // the old `animus daemon.*<root>` pattern (a) matched our own event
+    // bridge's `animus daemon stream …` children — reporting a stopped daemon
+    // as "running" with a bogus PID — and (b) broke entirely when the root
+    // path contained regex metacharacters (`+`, `(`, `[`).
+    let output = match Command::new("pgrep").arg("-fl").arg("animus").output().await {
         Ok(o) => o,
         Err(_) => return (false, None),
     };
     if !output.status.success() {
         return (false, None);
     }
-    let text = match String::from_utf8(output.stdout) {
-        Ok(t) => t,
-        Err(_) => return (false, None),
-    };
-    let pid = text
-        .lines()
-        .next()
-        .and_then(|line| line.trim().parse::<u32>().ok());
-    (pid.is_some(), pid)
+    let text = String::from_utf8_lossy(&output.stdout);
+    for line in text.lines() {
+        let Some((pid_str, cmdline)) = line.trim().split_once(char::is_whitespace) else {
+            continue;
+        };
+        // A real daemon process runs `animus … daemon run|start …`; the
+        // bridge's stream children run `animus daemon stream …`.
+        let is_daemon_proc = (cmdline.contains("daemon run") || cmdline.contains("daemon start"))
+            && !cmdline.contains("daemon stream");
+        if !is_daemon_proc {
+            continue;
+        }
+        if let Some(root) = project_root {
+            if !cmdline.contains(root) {
+                continue;
+            }
+        }
+        if let Ok(pid) = pid_str.trim().parse::<u32>() {
+            return (true, Some(pid));
+        }
+    }
+    (false, None)
 }
 
 async fn current_status_for(project_root: Option<&str>) -> DaemonStatus {

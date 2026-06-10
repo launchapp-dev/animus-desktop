@@ -199,6 +199,33 @@ Runtime smoke:
 - OpenAI/Codex model lists corrected to mid-2026 (gpt-5.5 family).
 
 ## Progress log (append each iteration: timestamp, what, test result)
+- 2026-06-09 ~AM — *** BUG-FIX SWEEP (3-agent review → 5 fix clusters, all landed) ***
+  A chat lifecycle: timeout_secs now ENFORCED (clamp 10-3600s, kill+end on expiry); stderr drained
+    concurrently w/ 256KB cap (pipe-deadlock fix); runs map self-cleans (lock held across
+    spawn+insert; abort-on-replace); chat_cancel emits synthetic end{error:"cancelled"} → turn
+    settles as done+"■ stopped" (never stuck running); queue pauses on stop (▶ resume); Esc scoped
+    off rail inputs.
+  B project isolation: ProjectModeContent key={project.id} (kills cross-project state bleed for ALL
+    views); SessionEntry{turnId,convId,pendingTitle} — stream frames only move convRef if user
+    still on owning conversation; auto-title renames the session's own conversation; rail delete
+    dispatches animus-conversation-deleted → ChatView resets + drafts pruned; rail refresh seq token.
+  C event_log: scope resolution now reuses chat.rs sha256+sanitize mirror (was DefaultHasher +
+    raw-basename prefix match = wrong-project data); local_events_read bounded VecDeque;
+    64MB per-file caps on runs scans/transcript; started_ms saturating_add; local_file_read
+    streams take(1MiB) (was whole-file alloc); ApprovalCard verdict-must-be-string; model.ts
+    data!==null guard.
+  D bridge/daemon/state: tail-drain on child exit (no lost workflow.complete); oversized lines →
+    stub w/ truncated heavy fields instead of dropped; re-attach w/ changed repo_path restarts
+    task; pgrep -fl + Rust filter (no more stream-children false positives / regex injection);
+    state persist unique tmp; daemon.ts opSeq (stale refresh can't clobber start/stop); App.tsx
+    detach-after-cancelled-attach; projectEvents enqueue cap.
+  E view races: FilesView roots cancelled-flag + dir/file seq tokens + pure closeTab; SubjectsView
+    refresh seq (wrong-backend-write race); JournalView runs seq; WorkflowsView refresh seq;
+    workflow_yaml writes confined to .animus/*.ya?ml (no ..) + .bak before rewrite; Bridge
+    auto-select once.
+  Tests: cargo check clean + 24 pass; tsc clean; vitest 53 pass (6 files); build green; app
+  rebuilt pid 85944, 0 panics. NOT fixed (noted): agent-chip is cosmetic until CLI --agent flag
+  is installed; pool_size>1 span interleave heuristic; JournalView ts-fallback jitter (cosmetic).
 - 2026-06-09 ~08:5x — P5#23 chat search CLI (animus) + *** ADOPTED WORKTREE WORKFLOW ***. A concurrent
   agent reset main mid-fire (wiped my uncommitted search edits) + added an unrelated skill_scoping
   build break. Per Sami's directive, redid search in an isolated worktree (branch chat-search off

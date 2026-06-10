@@ -957,6 +957,51 @@ fn build_mcp_entry(input: &McpServerInput) -> Mapping {
     entry
 }
 
+/// Writes from the renderer are confined to workflow YAML inside a project's
+/// `.animus/` directory — `source_file` is frontend-supplied, and without
+/// this check a buggy/compromised renderer could overwrite any YAML-shaped
+/// file the user owns.
+fn validate_animus_yaml_path(path: &std::path::Path) -> Result<(), String> {
+    use std::path::Component;
+    let ext_ok = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("yaml") || e.eq_ignore_ascii_case("yml"))
+        .unwrap_or(false);
+    if !ext_ok {
+        return Err(format!("{}: not a YAML file", path.display()));
+    }
+    if path
+        .components()
+        .any(|c| matches!(c, Component::ParentDir))
+    {
+        return Err("source_file may not contain `..`".into());
+    }
+    if !path
+        .components()
+        .any(|c| matches!(c, Component::Normal(n) if n == ".animus"))
+    {
+        return Err(format!(
+            "{}: writes are confined to a project's .animus/ directory",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Best-effort `.bak` snapshot before rewriting a hand-editable YAML file —
+/// the serde round-trip strips comments/anchors, so keep the user's original.
+async fn backup_yaml(path: &std::path::Path) {
+    if path.is_file() {
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("yaml");
+        let bak = path.with_extension(format!("{ext}.bak"));
+        let _ = tokio::fs::copy(path, &bak).await;
+    }
+}
+
 /// Create or overwrite a single `mcp_servers:` entry. `source_file` is the YAML
 /// file to write into — it is created (with an `mcp_servers:` block) if missing.
 #[tauri::command]
@@ -970,6 +1015,7 @@ pub async fn local_mcp_server_upsert(
         return Err("server id is required".into());
     }
     let path = PathBuf::from(source_file.trim());
+    validate_animus_yaml_path(&path)?;
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent)
             .await
@@ -1009,6 +1055,7 @@ pub async fn local_mcp_server_upsert(
     if !serialized.ends_with('\n') {
         serialized.push('\n');
     }
+    backup_yaml(&path).await;
     tokio::fs::write(&path, serialized.as_bytes())
         .await
         .map_err(|e| format!("write {}: {}", path.display(), e))?;
@@ -1025,6 +1072,7 @@ pub async fn local_mcp_link(
     linked: bool,
 ) -> Result<(), String> {
     let path = PathBuf::from(source_file.trim());
+    validate_animus_yaml_path(&path)?;
     if !path.is_file() {
         return Err(format!("{} is not a file", path.display()));
     }
@@ -1077,6 +1125,7 @@ pub async fn local_mcp_link(
     if !serialized.ends_with('\n') {
         serialized.push('\n');
     }
+    backup_yaml(&path).await;
     tokio::fs::write(&path, serialized.as_bytes())
         .await
         .map_err(|e| format!("write {}: {}", path.display(), e))?;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentFace } from "../../components/AgentFace";
 import {
   useProjectEvents,
@@ -246,18 +246,22 @@ export function JournalView({ project }: { project: Project }) {
     };
   }, [project.id, project.repo_path, setAgentByPhase]);
 
+  // Last-issued-wins token so a slow 500-run scan can't land after a newer
+  // load and overwrite it with stale results.
+  const runsSeq = useRef(0);
   const loadRuns = useCallback(async () => {
     const path = project.repo_path?.trim();
     if (!path) return;
+    const seq = ++runsSeq.current;
     setLoadingRuns(true);
     try {
       invalidateLocalWorkflowsCache(path);
       const list = await localWorkflowRuns({ repoPath: path, limit: 500 });
-      setRuns(list);
+      if (seq === runsSeq.current) setRuns(list);
     } catch (e) {
       console.warn("[journal] run index failed", e);
     } finally {
-      setLoadingRuns(false);
+      if (seq === runsSeq.current) setLoadingRuns(false);
     }
   }, [project.repo_path]);
 

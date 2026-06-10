@@ -77,6 +77,13 @@ function ConversationRow({
     setBusy(true);
     try {
       await chatDelete(repoPath, c.id);
+      // Let ChatView reset if it's pointed at this conversation (and prune
+      // its composer draft) — otherwise its next send targets a dead id.
+      window.dispatchEvent(
+        new CustomEvent("animus-conversation-deleted", {
+          detail: { projectId: c.projectId, conversationId: c.id },
+        }),
+      );
       onChanged();
     } catch {
       /* ignore */
@@ -215,7 +222,11 @@ export function ProjectsRail({
     }
   }, []);
 
+  // Monotonic sequence so a slow, older chatListAll can never overwrite a
+  // newer result (e.g. a just-renamed title flickering back).
+  const refreshSeq = useRef(0);
   const refreshConversations = useCallback(async () => {
+    const seq = ++refreshSeq.current;
     const adopted = projects
       .filter((p) => p.repo_path)
       .map((p) => ({
@@ -228,7 +239,8 @@ export function ProjectsRail({
       return;
     }
     try {
-      setConversations(await chatListAll(adopted));
+      const list = await chatListAll(adopted);
+      if (seq === refreshSeq.current) setConversations(list);
     } catch {
       // leave prior list in place on transient error
     }

@@ -112,16 +112,22 @@ impl AppState {
         };
 
         let path = self.projects_file();
-        let tmp_path = path.with_extension("json.tmp");
+        // Unique tmp per persist — two concurrent mutating commands sharing
+        // one tmp path could interleave write/rename into a corrupt file.
+        let tmp_path = path.with_extension(format!(
+            "json.tmp.{}",
+            uuid::Uuid::new_v4().simple()
+        ));
         let bytes = serde_json::to_vec_pretty(&snapshot)
             .map_err(|e| format!("serialize projects: {e}"))?;
 
         tokio::fs::write(&tmp_path, &bytes)
             .await
             .map_err(|e| format!("write projects tmp: {e}"))?;
-        tokio::fs::rename(&tmp_path, &path)
-            .await
-            .map_err(|e| format!("rename projects file: {e}"))?;
+        if let Err(e) = tokio::fs::rename(&tmp_path, &path).await {
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+            return Err(format!("rename projects file: {e}"));
+        }
         Ok(())
     }
 }

@@ -66,7 +66,13 @@ export function extractApproval(content: string): {
   const jsonStr = content.slice(start, end);
   try {
     const parsed = JSON.parse(jsonStr) as ApprovalPayload;
-    if (parsed && typeof parsed === "object" && "verdict" in parsed) {
+    // verdict must be a STRING — `{"verdict": null}` / numbers would crash
+    // ApprovalCard's .toLowerCase() at render time.
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof (parsed as { verdict?: unknown }).verdict === "string"
+    ) {
       // Trim a wrapping ```json fence if present around the object.
       let prefix = content.slice(0, start);
       let suffix = content.slice(end);

@@ -401,7 +401,11 @@ export function parseRawEventLine(
     const parsed = JSON.parse(raw);
     // envelope may wrap data
     v =
-      parsed && typeof parsed === "object" && "data" in parsed && typeof parsed.data === "object"
+      parsed &&
+      typeof parsed === "object" &&
+      "data" in parsed &&
+      typeof parsed.data === "object" &&
+      parsed.data !== null // typeof null === "object" — would throw on v[k]
         ? (parsed.data as Record<string, unknown>)
         : (parsed as Record<string, unknown>);
   } catch {

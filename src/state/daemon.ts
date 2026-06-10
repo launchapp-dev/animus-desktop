@@ -23,19 +23,28 @@ interface DaemonState {
 // same time = 15 subprocess spawns. With dedup they share one call.
 let refreshInFlight: Promise<void> | null = null;
 
+// Monotonic op counter: a slow background `refresh` that started BEFORE an
+// install/start/stop must not land afterwards and overwrite the fresh
+// post-mutation status with a stale snapshot ("daemon down" right after the
+// user started it).
+let opSeq = 0;
+
 export const useDaemonStore = create<DaemonState>((set) => ({
   status: null,
   loading: false,
   error: null,
   refresh: async () => {
     if (refreshInFlight) return refreshInFlight;
+    const seq = opSeq;
     refreshInFlight = (async () => {
       set({ loading: true, error: null });
       try {
         const status = await daemonStatus();
-        set({ status, loading: false });
+        if (seq === opSeq) set({ status, loading: false });
+        else set({ loading: false });
       } catch (e) {
-        set({ error: String(e), loading: false });
+        if (seq === opSeq) set({ error: String(e), loading: false });
+        else set({ loading: false });
       } finally {
         refreshInFlight = null;
       }
@@ -43,27 +52,33 @@ export const useDaemonStore = create<DaemonState>((set) => ({
     return refreshInFlight;
   },
   install: async () => {
+    opSeq++;
     set({ loading: true, error: null });
     try {
       const status = await daemonInstall();
+      opSeq++;
       set({ status, loading: false });
     } catch (e) {
       set({ error: String(e), loading: false });
     }
   },
   start: async () => {
+    opSeq++;
     set({ loading: true, error: null });
     try {
       const status = await daemonStart();
+      opSeq++;
       set({ status, loading: false });
     } catch (e) {
       set({ error: String(e), loading: false });
     }
   },
   stop: async () => {
+    opSeq++;
     set({ loading: true, error: null });
     try {
       const status = await daemonStop();
+      opSeq++;
       set({ status, loading: false });
     } catch (e) {
       set({ error: String(e), loading: false });

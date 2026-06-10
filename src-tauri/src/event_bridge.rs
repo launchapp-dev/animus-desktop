@@ -90,7 +90,7 @@ pub struct CycleEvent {
 
 #[derive(Debug, Clone, Default)]
 pub struct BridgeManager {
-    tasks: Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
+    tasks: Arc<Mutex<HashMap<String, (PathBuf, JoinHandle<()>)>>>,
 }
 
 impl BridgeManager {
@@ -100,19 +100,27 @@ impl BridgeManager {
 
     pub async fn spawn_for_project(&self, app: AppHandle, project_id: String, repo_path: PathBuf) {
         let mut tasks = self.tasks.lock().await;
-        if tasks.contains_key(&project_id) {
-            return;
+        if let Some((existing_path, _)) = tasks.get(&project_id) {
+            if existing_path == &repo_path {
+                return;
+            }
+            // Re-adopted at a different path: the old loop would stream the
+            // stale location forever. Restart it against the new path.
+            if let Some((_, old)) = tasks.remove(&project_id) {
+                old.abort();
+            }
         }
         let pid = project_id.clone();
+        let path_for_task = repo_path.clone();
         let handle = tauri::async_runtime::spawn(async move {
-            run_loop(app, Some(pid), Some(repo_path)).await;
+            run_loop(app, Some(pid), Some(path_for_task)).await;
         });
-        tasks.insert(project_id, handle);
+        tasks.insert(project_id, (repo_path, handle));
     }
 
     pub async fn kill_for_project(&self, project_id: &str) {
         let mut tasks = self.tasks.lock().await;
-        if let Some(handle) = tasks.remove(project_id) {
+        if let Some((_, handle)) = tasks.remove(project_id) {
             handle.abort();
         }
     }
@@ -283,10 +291,22 @@ async fn run_once(
                             lines_in_window = 0;
                             dropped_in_window = 0;
                         }
-                        if text.len() > BRIDGE_MAX_LINE_BYTES {
+                        if lines_in_window >= BRIDGE_MAX_LINES_PER_SEC {
                             dropped_in_window = dropped_in_window.saturating_add(1);
-                        } else if lines_in_window >= BRIDGE_MAX_LINES_PER_SEC {
-                            dropped_in_window = dropped_in_window.saturating_add(1);
+                        } else if text.len() > BRIDGE_MAX_LINE_BYTES {
+                            // Don't drop oversized lines wholesale — a huge
+                            // `phase.complete`/`workflow.complete` carries the
+                            // terminal state the UI needs. Truncate the heavy
+                            // fields and forward a stub instead.
+                            match stub_oversized_line(&text) {
+                                Some(stub) => {
+                                    lines_in_window += 1;
+                                    dispatch_line(app, project_id, &stub);
+                                }
+                                None => {
+                                    dropped_in_window = dropped_in_window.saturating_add(1);
+                                }
+                            }
                         } else {
                             lines_in_window += 1;
                             dispatch_line(app, project_id, &text);
@@ -303,6 +323,11 @@ async fn run_once(
                 }
             }
             status = child.wait() => {
+                // The child can exit while its final lines (often the
+                // terminal `workflow.complete`) are still buffered in the
+                // pipe — drain them before reporting the exit, or the UI
+                // shows the workflow as running forever.
+                drain_remaining_lines(app, project_id, &mut reader).await;
                 match status {
                     Ok(s) => {
                         return Err(format!("animus daemon stream exited: {s}"));
@@ -314,6 +339,57 @@ async fn run_once(
             }
         }
     }
+}
+
+/// After child exit, read whatever is left in the pipe (bounded by the OS
+/// pipe buffer, so this terminates quickly) and dispatch it.
+async fn drain_remaining_lines(
+    app: &AppHandle,
+    project_id: Option<&str>,
+    reader: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+) {
+    while let Ok(Some(text)) = reader.next_line().await {
+        if text.len() > BRIDGE_MAX_LINE_BYTES {
+            if let Some(stub) = stub_oversized_line(&text) {
+                dispatch_line(app, project_id, &stub);
+            }
+        } else {
+            dispatch_line(app, project_id, &text);
+        }
+    }
+}
+
+/// Shrink an oversized event line by replacing its heavy payload fields with
+/// size markers, preserving the routing/status fields the UI actually needs.
+/// Returns None when the line isn't JSON (nothing useful to salvage).
+fn stub_oversized_line(text: &str) -> Option<String> {
+    let mut v: Value = serde_json::from_str(text.trim()).ok()?;
+    fn strip_heavy(value: &mut Value) {
+        if let Some(map) = value.as_object_mut() {
+            for key in ["meta", "content", "output", "raw", "detail"] {
+                if let Some(val) = map.get_mut(key) {
+                    let rendered = val.to_string();
+                    if rendered.len() > 4096 {
+                        *val = Value::String(format!(
+                            "[truncated: {} bytes dropped by event bridge]",
+                            rendered.len()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    if let Some(data) = v.get_mut("data") {
+        strip_heavy(data);
+    }
+    strip_heavy(&mut v);
+    let out = v.to_string();
+    // If still oversized after stripping (e.g. thousands of small fields),
+    // give up rather than forward a megabyte line.
+    if out.len() > BRIDGE_MAX_LINE_BYTES {
+        return None;
+    }
+    Some(out)
 }
 
 fn dispatch_line(app: &AppHandle, project_id: Option<&str>, raw: &str) {

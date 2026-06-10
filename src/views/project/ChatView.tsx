@@ -43,6 +43,19 @@ interface ChatTurn {
   error: string | null;
   usage?: ChatUsage | null;
   cost?: number | null;
+  /** True when the user stopped this turn mid-stream. */
+  stopped?: boolean;
+}
+
+/** Per-session bookkeeping for an in-flight `chat send`. `convId` is the
+ *  conversation that OWNS the session (null until the CLI reports the id of a
+ *  freshly-created one) — stream frames must never clobber `convRef` for a
+ *  different conversation the user has since opened. `pendingTitle` rides
+ *  with the session so auto-naming can only ever rename its own conversation. */
+interface SessionEntry {
+  turnId: string;
+  convId: string | null;
+  pendingTitle: string | null;
 }
 
 let sessionCounter = 0;
@@ -302,12 +315,16 @@ export function ChatView({ project }: { project: Project }) {
   );
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [queue, setQueue] = useState<string[]>([]);
+  // Stopping a turn pauses the queue so the next message doesn't instantly
+  // auto-fire at an agent the user just halted. Cleared on the next submit
+  // or via the explicit resume affordance.
+  const [queuePaused, setQueuePaused] = useState(false);
   const [activeSession, setActiveSession] = useState<string | null>(null);
-  const turnsRef = useRef<Map<string, string>>(new Map());
+  const turnsRef = useRef<Map<string, SessionEntry>>(new Map());
   const convRef = useRef<string | null>(null);
-  // Title to apply once a brand-new conversation gets its id (auto-naming from
-  // the first message). Set per-send; consumed on turn completion.
-  const pendingTitleRef = useRef<string | null>(null);
+  // Latest repo path for use inside the once-registered stream listeners.
+  const projectPathRef = useRef(project.repo_path);
+  projectPathRef.current = project.repo_path;
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [atBottom, setAtBottom] = useState(true);
@@ -439,21 +456,39 @@ export function ChatView({ project }: { project: Project }) {
       const subs = await Promise.all([
         listen<ChatStreamLine>("chat-stream", (ev) => {
           const { sessionId, raw } = ev.payload;
-          const turnId = turnsRef.current.get(sessionId);
-          if (!turnId) return;
+          const entry = turnsRef.current.get(sessionId);
+          if (!entry) return;
+          const turnId = entry.turnId;
           let frame: ChatProtoEvent;
           try {
             frame = JSON.parse(raw) as ChatProtoEvent;
           } catch {
             return;
           }
-          if (frame.type === "turn_started" && frame.conversation_id) {
-            convRef.current = frame.conversation_id;
-            return;
-          }
-          if (frame.type === "turn_completed") {
+          // Adopt the CLI-reported conversation id, but only move `convRef`
+          // when the user is still on the conversation that owns this session
+          // — otherwise a finishing background turn would yank the target of
+          // the user's NEXT message back to an old conversation.
+          if (frame.type === "turn_started" || frame.type === "turn_completed") {
             if (frame.conversation_id) {
-              convRef.current = frame.conversation_id;
+              if (convRef.current === entry.convId) {
+                convRef.current = frame.conversation_id;
+              }
+              entry.convId = frame.conversation_id;
+            }
+            if (frame.type === "turn_completed" && entry.pendingTitle) {
+              // Auto-name the session's OWN conversation (never whatever the
+              // user happens to be viewing now).
+              const title = entry.pendingTitle;
+              entry.pendingTitle = null;
+              const path = projectPathRef.current?.trim();
+              if (path && entry.convId) {
+                void chatRename(path, entry.convId, title)
+                  .catch(() => {})
+                  .finally(() =>
+                    window.dispatchEvent(new Event("animus-chat-updated")),
+                  );
+              }
             }
             return;
           }
@@ -481,19 +516,25 @@ export function ChatView({ project }: { project: Project }) {
         }),
         listen<ChatStreamEnd>("chat-stream-end", (ev) => {
           const { sessionId, exitCode, error } = ev.payload;
-          const turnId = turnsRef.current.get(sessionId);
-          if (!turnId) return;
+          const entry = turnsRef.current.get(sessionId);
+          if (!entry) return;
+          const turnId = entry.turnId;
+          // A user-initiated stop is not a failure: settle the turn as done
+          // (with a "stopped" marker) instead of leaving it spinning or red.
+          const wasCancelled = error === "cancelled";
           setTurns((prev) =>
             prev.map((t) =>
               t.id === turnId
-                ? {
-                    ...t,
-                    status:
-                      error || (exitCode != null && exitCode !== 0)
-                        ? "error"
-                        : "done",
-                    error,
-                  }
+                ? wasCancelled
+                  ? { ...t, status: "done", error: null, stopped: true }
+                  : {
+                      ...t,
+                      status:
+                        error || (exitCode != null && exitCode !== 0)
+                          ? "error"
+                          : "done",
+                      error,
+                    }
                 : t,
             ),
           );
@@ -541,23 +582,34 @@ export function ChatView({ project }: { project: Project }) {
     [newConversation],
   );
 
-  // When a turn finishes (active session clears), auto-name a brand-new
-  // conversation from its first message, then tell the left rail to re-aggregate
-  // so the new (named) conversation appears / counts update.
+  // When a turn finishes (active session clears), tell the left rail to
+  // re-aggregate so a brand-new conversation appears / counts update.
+  // (Auto-titling is handled per-session in the stream handler so it can
+  // never rename a conversation the session doesn't own.)
   useEffect(() => {
-    if (activeSession) return;
-    const title = pendingTitleRef.current;
-    const id = convRef.current;
-    const path = project.repo_path?.trim();
-    if (title && id && path) {
-      pendingTitleRef.current = null;
-      void chatRename(path, id, title)
-        .catch(() => {})
-        .finally(() => window.dispatchEvent(new Event("animus-chat-updated")));
-    } else {
+    if (!activeSession) {
       window.dispatchEvent(new Event("animus-chat-updated"));
     }
-  }, [activeSession, project.repo_path]);
+  }, [activeSession]);
+
+  // If the conversation we're pointed at is deleted from the rail, reset to a
+  // fresh one instead of sending future turns at a dead id; always prune its
+  // composer draft.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const d = (e as CustomEvent).detail as
+        | { projectId?: string; conversationId?: string }
+        | undefined;
+      if (!d?.conversationId) return;
+      composerDrafts.delete(`${d.projectId}:${d.conversationId}`);
+      if (d.projectId === project.id && convRef.current === d.conversationId) {
+        newConversation();
+      }
+    };
+    window.addEventListener("animus-conversation-deleted", handler);
+    return () =>
+      window.removeEventListener("animus-conversation-deleted", handler);
+  }, [project.id, newConversation]);
 
   const currentProvider = useMemo(
     () => providers.find((p) => p.tool === tool),
@@ -571,13 +623,16 @@ export function ChatView({ project }: { project: Project }) {
     const path = project.repo_path?.trim();
     const text = (override ?? prompt).trim();
     if (!path || !text || busy) return;
-    // Auto-name a brand-new conversation from its first message; clear the
-    // pending title when continuing an existing one so it can't leak forward.
-    pendingTitleRef.current =
-      convRef.current == null ? deriveConversationTitle(text) || null : null;
     const sessionId = nextSessionId();
     const turnId = `turn-${sessionId}`;
-    turnsRef.current.set(sessionId, turnId);
+    turnsRef.current.set(sessionId, {
+      turnId,
+      convId: convRef.current,
+      // Auto-name a brand-new conversation from its first message; an
+      // existing conversation gets no pending title so nothing can leak.
+      pendingTitle:
+        convRef.current == null ? deriveConversationTitle(text) || null : null,
+    });
     const turn: ChatTurn = {
       id: turnId,
       prompt: text,
@@ -619,16 +674,30 @@ export function ChatView({ project }: { project: Project }) {
 
   const cancel = useCallback(async () => {
     if (!activeSession) return;
+    // Pause the queue FIRST (same batch as the optimistic session clear) so
+    // stopping a turn doesn't instantly auto-fire the next queued message at
+    // an agent the user just halted.
+    setQueuePaused(true);
     await chatCancel(activeSession).catch(() => {});
     setActiveSession(null);
   }, [activeSession]);
 
-  // Esc stops the in-flight turn (works while focused in the composer). No-op
-  // when nothing is running, so it never steals Esc from other uses.
+  // Esc stops the in-flight turn. No-op when nothing is running, and ignored
+  // when focus is in some OTHER text field (rail rename/search) — only the
+  // composer textarea or non-form focus may trigger it.
   useHotkeys(
     "escape",
     () => {
-      if (activeSession) void cancel();
+      if (!activeSession) return;
+      const ae = document.activeElement;
+      if (ae instanceof HTMLInputElement) return;
+      if (
+        ae instanceof HTMLTextAreaElement &&
+        !ae.classList.contains("cx-composer__input")
+      ) {
+        return;
+      }
+      void cancel();
     },
     { enableOnFormTags: true },
     [activeSession, cancel],
@@ -639,6 +708,7 @@ export function ChatView({ project }: { project: Project }) {
   const submit = useCallback(() => {
     const text = prompt.trim();
     if (!text) return;
+    setQueuePaused(false);
     if (busy) {
       setQueue((q) => [...q, text]);
       setPrompt("");
@@ -648,15 +718,16 @@ export function ChatView({ project }: { project: Project }) {
     }
   }, [prompt, busy, send, project.id]);
 
-  // Drain the queue: as soon as no turn is active, fire the next queued
-  // message. send() sets activeSession synchronously, so this can't double-fire.
+  // Drain the queue: as soon as no turn is active (and the queue isn't
+  // paused by a stop), fire the next queued message. send() sets
+  // activeSession synchronously, so this can't double-fire.
   useEffect(() => {
-    if (!activeSession && queue.length > 0) {
+    if (!activeSession && !queuePaused && queue.length > 0) {
       const [next, ...rest] = queue;
       setQueue(rest);
       void send(next);
     }
-  }, [activeSession, queue, send]);
+  }, [activeSession, queuePaused, queue, send]);
 
   function pickAgent(id: string) {
     setAgentId(id);
@@ -827,6 +898,11 @@ export function ChatView({ project }: { project: Project }) {
                           )}
                         </div>
                       )}
+                      {turn.stopped && (
+                        <div className="cx-msg__stopped" title="Turn stopped by you">
+                          ■ stopped
+                        </div>
+                      )}
                       {turn.status !== "running" &&
                         (() => {
                           const meta = formatUsage(turn.usage, turn.cost);
@@ -859,7 +935,19 @@ export function ChatView({ project }: { project: Project }) {
               {queue.length > 0 && (
                 <div className="cx-queue">
                   <span className="cx-queue__label">
-                    Queued · sends when the agent is free
+                    {queuePaused
+                      ? "Queue paused (you stopped the agent)"
+                      : "Queued · sends when the agent is free"}
+                    {queuePaused && (
+                      <button
+                        type="button"
+                        className="cx-queue__resume"
+                        onClick={() => setQueuePaused(false)}
+                        title="Resume sending queued messages"
+                      >
+                        ▶ resume
+                      </button>
+                    )}
                   </span>
                   {queue.map((q, i) => (
                     <div key={i} className="cx-queue__item">

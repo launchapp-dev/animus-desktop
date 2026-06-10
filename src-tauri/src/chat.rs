@@ -102,7 +102,7 @@ fn repository_scope_for_path(path: &Path) -> String {
 /// Resolve `~/.animus/<scope>` for a project, mirroring animus: the
 /// hash-derived dir if it exists, else a scope whose `.project-root` marker
 /// canonicalizes to the same path (covers origin-fallback / moved scopes).
-fn scoped_state_root(project_root: &Path) -> Option<PathBuf> {
+pub(crate) fn scoped_state_root(project_root: &Path) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
     let ao_root = home.join(".animus");
     let hashed = ao_root.join(repository_scope_for_path(project_root));
@@ -170,6 +170,10 @@ pub async fn chat_agent_run(
 
     let session_id = args.session_id.clone();
     let app_for_task = app.clone();
+    let runs_for_task = manager.runs.clone();
+    // Wall-clock cap on the provider process. This field was previously
+    // accepted but never read — a hung provider stalled the turn forever.
+    let timeout_secs = args.timeout_secs.unwrap_or(600).clamp(10, 3600);
 
     let mut cmd = Command::new(&bin);
     cmd.arg("chat")
@@ -196,90 +200,149 @@ pub async fn chat_agent_run(
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
 
+    // Hold the runs lock across spawn + insert so the task's self-removal at
+    // completion can never lose the race with our insert (which would strand
+    // a finished JoinHandle in the map forever).
+    let mut runs_guard = manager.runs.lock().await;
     let handle = tauri::async_runtime::spawn(async move {
-        let mut child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(e) => {
-                let _ = app_for_task.emit(
-                    "chat-stream-end",
-                    &ChatStreamEnd {
-                        session_id: session_id.clone(),
-                        exit_code: None,
-                        error: Some(format!("spawn failed: {e}")),
-                    },
-                );
-                return;
-            }
-        };
-        let stdout = match child.stdout.take() {
-            Some(s) => s,
-            None => {
-                let _ = app_for_task.emit(
-                    "chat-stream-end",
-                    &ChatStreamEnd {
-                        session_id: session_id.clone(),
-                        exit_code: None,
-                        error: Some("no stdout".to_string()),
-                    },
-                );
-                return;
-            }
-        };
-        let stderr = child.stderr.take();
-        let mut reader = BufReader::new(stdout).lines();
-
-        loop {
-            match reader.next_line().await {
-                Ok(Some(line)) => {
-                    let trimmed = line.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-                    let _ = app_for_task.emit(
-                        "chat-stream",
-                        &ChatStreamLine {
-                            session_id: session_id.clone(),
-                            raw: trimmed.to_string(),
-                        },
-                    );
-                }
-                Ok(None) => break,
-                Err(_) => break,
-            }
-        }
-
-        let status = child.wait().await.ok();
-        let mut err_text: Option<String> = None;
-        if let Some(mut se) = stderr {
-            use tokio::io::AsyncReadExt;
-            let mut buf = String::new();
-            let _ = se.read_to_string(&mut buf).await;
-            let t = buf.trim();
-            if !t.is_empty() {
-                err_text = Some(t.to_string());
-            }
-        }
+        let (exit_code, error) =
+            run_chat_child(cmd, &app_for_task, &session_id, timeout_secs).await;
+        // Remove BEFORE emitting: chat_cancel only emits its synthetic end
+        // event when it actually removed an entry, so exactly one
+        // `chat-stream-end` is delivered per session, never two.
+        runs_for_task.lock().await.remove(&session_id);
         let _ = app_for_task.emit(
             "chat-stream-end",
-            &ChatStreamEnd {
-                session_id: session_id.clone(),
-                exit_code: status.and_then(|s| s.code()),
-                error: err_text,
-            },
+            &ChatStreamEnd { session_id: session_id.clone(), exit_code, error },
         );
     });
-
-    manager.runs.lock().await.insert(args.session_id.clone(), handle);
+    if let Some(old) = runs_guard.insert(args.session_id.clone(), handle) {
+        // A reused session id must not leave the previous child streaming
+        // under the same tag, uncancellable.
+        old.abort();
+    }
     Ok(())
+}
+
+/// Drive one `animus chat send` child to completion: stream stdout lines as
+/// `chat-stream` events, drain stderr CONCURRENTLY (a chatty provider that
+/// fills the ~64KB stderr pipe buffer would otherwise deadlock the turn),
+/// and enforce the wall-clock timeout. Returns (exit_code, error).
+async fn run_chat_child(
+    mut cmd: Command,
+    app: &AppHandle,
+    session_id: &str,
+    timeout_secs: u64,
+) -> (Option<i32>, Option<String>) {
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => return (None, Some(format!("spawn failed: {e}"))),
+    };
+    let stdout = match child.stdout.take() {
+        Some(s) => s,
+        None => return (None, Some("no stdout".to_string())),
+    };
+    let stderr_task = child
+        .stderr
+        .take()
+        .map(|se| tauri::async_runtime::spawn(read_stderr_capped(se)));
+    let mut reader = BufReader::new(stdout).lines();
+
+    let deadline =
+        tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+    let mut timed_out = false;
+    loop {
+        match tokio::time::timeout_at(deadline, reader.next_line()).await {
+            Err(_) => {
+                timed_out = true;
+                break;
+            }
+            Ok(Ok(Some(line))) => {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let _ = app.emit(
+                    "chat-stream",
+                    &ChatStreamLine {
+                        session_id: session_id.to_string(),
+                        raw: trimmed.to_string(),
+                    },
+                );
+            }
+            Ok(Ok(None)) | Ok(Err(_)) => break,
+        }
+    }
+
+    if timed_out {
+        let _ = child.start_kill();
+    }
+    let status = child.wait().await.ok();
+    let stderr_text = match stderr_task {
+        Some(t) => t
+            .await
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
+        None => None,
+    };
+    let exit_code = status.and_then(|s| s.code());
+    // Only surface stderr as an error on a failed exit — providers write
+    // warnings/progress to stderr on success, and forwarding it
+    // unconditionally would mark perfectly good turns as failed.
+    let error = if timed_out {
+        Some(match stderr_text {
+            Some(s) => format!("timed out after {timeout_secs}s; stderr: {s}"),
+            None => format!("timed out after {timeout_secs}s"),
+        })
+    } else if exit_code != Some(0) {
+        stderr_text.or_else(|| Some(format!("provider exited with code {exit_code:?}")))
+    } else {
+        None
+    };
+    (exit_code, error)
+}
+
+/// Drain a child's stderr to EOF, retaining at most 256KB (a runaway writer
+/// must neither deadlock the pipe nor balloon memory).
+async fn read_stderr_capped(mut se: tokio::process::ChildStderr) -> String {
+    use tokio::io::AsyncReadExt;
+    const CAP: usize = 256 * 1024;
+    let mut kept: Vec<u8> = Vec::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        match se.read(&mut buf).await {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                if kept.len() < CAP {
+                    let take = (CAP - kept.len()).min(n);
+                    kept.extend_from_slice(&buf[..take]);
+                }
+            }
+        }
+    }
+    String::from_utf8_lossy(&kept).to_string()
 }
 
 #[tauri::command]
 pub async fn chat_cancel(
+    app: AppHandle,
     manager: tauri::State<'_, ChatManager>,
     session_id: String,
 ) -> Result<(), String> {
     if let Some(handle) = manager.runs.lock().await.remove(&session_id) {
+        // Aborting kills the task that would have emitted `chat-stream-end`
+        // (the child dies via kill_on_drop), so emit a synthetic terminal
+        // event — otherwise the turn spins as "running" forever.
         handle.abort();
+        let _ = app.emit(
+            "chat-stream-end",
+            &ChatStreamEnd {
+                session_id,
+                exit_code: None,
+                error: Some("cancelled".to_string()),
+            },
+        );
     }
     Ok(())
 }

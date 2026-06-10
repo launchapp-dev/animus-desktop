@@ -7,6 +7,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
+/// Skip any single run/transcript file larger than this rather than loading
+/// it whole — LLM transcripts can carry enormous tool_result payloads.
+const MAX_RUN_FILE_BYTES: u64 = 64 * 1024 * 1024;
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoricalEvent {
@@ -55,17 +59,7 @@ pub struct HistoricalReadArgs {
 pub async fn local_events_read(
     args: HistoricalReadArgs,
 ) -> Result<Vec<HistoricalEvent>, String> {
-    let repo = PathBuf::from(args.repo_path.trim());
-    if !repo.is_dir() {
-        return Err(format!("{} is not a directory", repo.display()));
-    }
-    let scope = repository_scope_for_path(&repo)?;
-    let logs_dir = dirs::home_dir()
-        .ok_or_else(|| "no home dir".to_string())?
-        .join(".animus")
-        .join(&scope)
-        .join("logs");
-    let path = logs_dir.join("events.jsonl");
+    let path = logs_dir_for(&args.repo_path)?.join("events.jsonl");
     if !path.is_file() {
         return Ok(Vec::new());
     }
@@ -75,7 +69,11 @@ pub async fn local_events_read(
         .map_err(|e| format!("open {}: {}", path.display(), e))?;
     let reader = BufReader::new(file);
     let mut lines = reader.lines();
-    let mut buf: Vec<HistoricalEvent> = Vec::with_capacity(limit);
+    // Bounded ring: events.jsonl is the daemon's append-only log and grows
+    // without limit (multi-GB files have happened). Holding only the trailing
+    // `limit` parsed events keeps memory flat no matter the file size.
+    let mut buf: std::collections::VecDeque<HistoricalEvent> =
+        std::collections::VecDeque::with_capacity(limit + 1);
     while let Ok(Some(text)) = lines.next_line().await {
         let trimmed = text.trim();
         if trimmed.is_empty() {
@@ -89,12 +87,13 @@ pub async fn local_events_read(
                 }
             }
         }
-        buf.push(evt);
+        buf.push_back(evt);
+        if buf.len() > limit {
+            buf.pop_front();
+        }
     }
-    // Newest first, capped at limit.
-    let take = buf.len().min(limit);
-    let start = buf.len() - take;
-    let mut out = buf.split_off(start);
+    // Newest first.
+    let mut out: Vec<HistoricalEvent> = buf.into_iter().collect();
     out.reverse();
     Ok(out)
 }
@@ -188,12 +187,19 @@ fn logs_dir_for(repo_path: &str) -> Result<PathBuf, String> {
     if !repo.is_dir() {
         return Err(format!("{} is not a directory", repo.display()));
     }
-    let scope = repository_scope_for_path(&repo)?;
-    Ok(dirs::home_dir()
-        .ok_or_else(|| "no home dir".to_string())?
-        .join(".animus")
-        .join(&scope)
-        .join("logs"))
+    // Reuse chat.rs's exact mirror of animus scope resolution (sha256 +
+    // sanitized basename + `.project-root` marker fallback). The previous
+    // local impl hashed with DefaultHasher and prefix-matched the raw
+    // basename, which could resolve to ANOTHER project's scope (two repos
+    // both named `api`) or to nothing at all (`My_Repo` vs `my-repo-…`).
+    crate::chat::scoped_state_root(&repo)
+        .map(|scope| scope.join("logs"))
+        .ok_or_else(|| {
+            format!(
+                "no scoped state directory for {} (looked under ~/.animus/)",
+                repo.display()
+            )
+        })
 }
 
 /// A per-phase run file groups under a workflow uuid. Filename shape:
@@ -347,7 +353,15 @@ pub async fn local_workflow_runs(
             continue;
         };
 
-        // Read the file to get ts range + counts (cheap-ish; files are small).
+        // Read the file to get ts range + counts. Size-guarded: a transcript
+        // with huge tool_result payloads must not balloon a directory scan.
+        if tokio::fs::metadata(&p)
+            .await
+            .map(|m| m.len() > MAX_RUN_FILE_BYTES)
+            .unwrap_or(true)
+        {
+            continue;
+        }
         let Ok(content) = tokio::fs::read_to_string(&p).await else {
             continue;
         };
@@ -427,7 +441,7 @@ pub async fn local_workflow_runs(
             // fallback: nearest span start before run start
             best = spans
                 .iter()
-                .filter(|s| s.start_ms <= run.started_ms + 5000)
+                .filter(|s| s.start_ms <= run.started_ms.saturating_add(5000))
                 .min_by_key(|s| (run.started_ms - s.start_ms).abs());
         }
         if let Some(sp) = best {
@@ -476,6 +490,14 @@ pub async fn local_run_transcript(
             None => continue,
         };
         if !name.starts_with(&prefix) || !name.ends_with(".jsonl") {
+            continue;
+        }
+        // Size-guarded for the same reason as the runs index scan.
+        if tokio::fs::metadata(&p)
+            .await
+            .map(|m| m.len() > MAX_RUN_FILE_BYTES)
+            .unwrap_or(true)
+        {
             continue;
         }
         let Ok(content) = tokio::fs::read_to_string(&p).await else {
@@ -568,51 +590,3 @@ fn base() -> HistoricalEvent {
     }
 }
 
-/// Mirror Animus's repository_scope_for_path: basename + short hash. This
-/// avoids depending on the upstream crate while still producing a directory
-/// name that matches what the daemon wrote.
-fn repository_scope_for_path(repo: &PathBuf) -> Result<String, String> {
-    let canonical = std::fs::canonicalize(repo)
-        .map_err(|e| format!("canonicalize {}: {}", repo.display(), e))?;
-    let basename = canonical
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| "no basename".to_string())?
-        .to_string();
-
-    // FxHash-like but stable; the directory name on disk is what counts so we
-    // try every match if scope hashing differs.
-    let path_str = canonical.to_string_lossy().to_string();
-    let suffix = short_hash(&path_str);
-
-    let candidate = format!("{}-{}", basename, suffix);
-    let home = dirs::home_dir().ok_or_else(|| "no home".to_string())?;
-    let direct = home.join(".animus").join(&candidate);
-    if direct.is_dir() {
-        return Ok(candidate);
-    }
-
-    // Fall back: scan ~/.animus/ for a directory starting with the basename.
-    let animus_dir = home.join(".animus");
-    if let Ok(rd) = std::fs::read_dir(&animus_dir) {
-        for entry in rd.flatten() {
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            if name_str.starts_with(&format!("{}-", basename)) && entry.path().is_dir() {
-                return Ok(name_str.to_string());
-            }
-        }
-    }
-    Err(format!(
-        "no scoped state directory for {} (looked under ~/.animus/)",
-        canonical.display()
-    ))
-}
-
-fn short_hash(input: &str) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut hasher = DefaultHasher::new();
-    input.hash(&mut hasher);
-    format!("{:012x}", hasher.finish())
-}

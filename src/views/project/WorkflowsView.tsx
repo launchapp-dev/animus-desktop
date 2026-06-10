@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   localWorkflowsRead,
   localWorkflowFileRead,
@@ -512,8 +512,11 @@ export function WorkflowsView({ project }: { project: Project }) {
   const [fileView, setFileView] = useState<FileView | null>(null);
   const agentLiveStates = useProjectAgentLiveStates(project.id);
 
+  // Last-issued-wins token: a slow read must not overwrite a newer one.
+  const refreshSeq = useRef(0);
   const refresh = useCallback(async () => {
     const path = project.repo_path?.trim();
+    const seq = ++refreshSeq.current;
     if (!path) {
       setReport(null);
       setReadError("This project has no folder path on disk.");
@@ -523,15 +526,17 @@ export function WorkflowsView({ project }: { project: Project }) {
     setReadError(null);
     try {
       const r = await localWorkflowsRead(path);
+      if (seq !== refreshSeq.current) return;
       setReport(r);
     } catch (e) {
+      if (seq !== refreshSeq.current) return;
       setReadError(String(e));
     } finally {
-      setLoading(false);
+      if (seq === refreshSeq.current) setLoading(false);
     }
     animusStatusGet(path)
       .then((s) => {
-        if (s.ok && s.data) setStatus(s.data);
+        if (seq === refreshSeq.current && s.ok && s.data) setStatus(s.data);
       })
       .catch(() => {});
   }, [project.repo_path]);
