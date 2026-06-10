@@ -30,6 +30,8 @@ export function chatAgentRun(args: {
   prompt: string;
   conversationId?: string;
   timeoutSecs?: number;
+  /** "low" | "medium" | "high"; omit for the provider default. */
+  reasoningEffort?: string;
 }): Promise<void> {
   return invoke<void>("chat_agent_run", {
     args: {
@@ -40,6 +42,7 @@ export function chatAgentRun(args: {
       prompt: args.prompt,
       conversationId: args.conversationId ?? null,
       timeoutSecs: args.timeoutSecs ?? null,
+      reasoningEffort: args.reasoningEffort ?? null,
     },
   });
 }

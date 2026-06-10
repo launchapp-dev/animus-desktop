@@ -150,6 +150,9 @@ pub struct ChatRunArgs {
     /// the `turn_started` frame reports the generated id.
     pub conversation_id: Option<String>,
     pub timeout_secs: Option<u64>,
+    /// Provider reasoning/thinking effort: "low" | "medium" | "high".
+    /// Omitted/empty = provider default (flag not passed).
+    pub reasoning_effort: Option<String>,
 }
 
 /// Spawn `animus chat send` (v0.5.10+ multi-turn) and stream its JSON event
@@ -192,6 +195,14 @@ pub async fn chat_agent_run(
     if let Some(model) = args.model.as_deref() {
         if !model.trim().is_empty() {
             cmd.arg("--model").arg(model);
+        }
+    }
+    if let Some(effort) = args.reasoning_effort.as_deref() {
+        // Allowlist the values the CLI's value_enum accepts — anything else
+        // would make the spawn fail with an argparse error.
+        let effort = effort.trim().to_ascii_lowercase();
+        if matches!(effort.as_str(), "low" | "medium" | "high") {
+            cmd.arg("--reasoning-effort").arg(&effort);
         }
     }
     // Positional message arg comes last.

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { Sparkles, Paperclip, ArrowDown } from "lucide-react";
+import { Sparkles, Paperclip, ArrowDown, Brain } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useHotkeys } from "react-hotkeys-hook";
 import { AgentFace, type AgentState } from "../../components/AgentFace";
@@ -109,6 +109,8 @@ function Composer({
   setTool,
   model,
   setModel,
+  effort,
+  setEffort,
   currentProvider,
   autofocus,
   lockHarness,
@@ -126,6 +128,10 @@ function Composer({
   setTool: (t: string) => void;
   model: string;
   setModel: (m: string) => void;
+  /** Reasoning effort: "" = provider default, else low|medium|high. Tunable
+   *  per turn, so it is never harness-locked. */
+  effort: string;
+  setEffort: (e: string) => void;
   currentProvider: ProviderOption | undefined;
   autofocus?: boolean;
   /** Once a conversation has turns it's bound to one provider; lock the
@@ -256,6 +262,23 @@ function Composer({
             />
           )}
         </label>
+        {/* reasoning-effort chip — per-turn tunable, never locked */}
+        <label
+          className={`cx-chip cx-chip--effort ${effort ? "cx-chip--effort-on" : ""}`}
+          title="Reasoning effort for the next turn"
+        >
+          <Brain size={13} className="cx-chip__effort-icon" />
+          <select
+            className="cx-chip__select"
+            value={effort}
+            onChange={(e) => setEffort(e.target.value)}
+          >
+            <option value="">effort: auto</option>
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+          </select>
+        </label>
 
         <span className="cx-toolbar__spacer" />
 
@@ -309,6 +332,8 @@ export function ChatView({ project }: { project: Project }) {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [tool, setTool] = useState("claude");
   const [model, setModel] = useState<string>("");
+  // Reasoning effort for the NEXT turn ("" = provider default).
+  const [effort, setEffort] = useState<string>("");
   const [agentId, setAgentId] = useState<string>("");
   const [prompt, setPrompt] = useState(
     () => composerDrafts.get(`${project.id}:new`) ?? "",
@@ -660,6 +685,7 @@ export function ChatView({ project }: { project: Project }) {
         prompt: turn.prompt,
         conversationId: convRef.current ?? undefined,
         timeoutSecs: 600,
+        reasoningEffort: effort || undefined,
       });
     } catch (e) {
       setTurns((prev) =>
@@ -670,7 +696,7 @@ export function ChatView({ project }: { project: Project }) {
       setActiveSession(null);
       turnsRef.current.delete(sessionId);
     }
-  }, [project.repo_path, prompt, busy, tool, model, agentId]);
+  }, [project.repo_path, prompt, busy, tool, model, agentId, effort]);
 
   const cancel = useCallback(async () => {
     if (!activeSession) return;
@@ -754,6 +780,8 @@ export function ChatView({ project }: { project: Project }) {
       setTool={setTool}
       model={model}
       setModel={setModel}
+      effort={effort}
+      setEffort={setEffort}
       currentProvider={currentProvider}
       autofocus={isEmpty}
       lockHarness={!isEmpty}

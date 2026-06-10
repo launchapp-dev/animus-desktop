@@ -6266,6 +6266,9 @@ a {
   width: 100px;
 }
 .cx-chip--model { padding-left: 10px; }
+/* reasoning-effort chip — dimmed icon at auto, accent when an effort is set */
+.cx-chip--effort .cx-chip__effort-icon { color: var(--text-faint); flex-shrink: 0; }
+.cx-chip--effort-on .cx-chip__effort-icon { color: var(--accent); }
 .cx-chip--locked { opacity: 0.55; cursor: default; }
 .cx-chip--locked:hover { border-color: var(--border); }
 .cx-chip--locked .cx-chip__select { cursor: default; }
