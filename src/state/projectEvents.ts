@@ -60,12 +60,26 @@ const GLOBAL_BUCKET = "__global__";
 
 type DecayTimers = Map<string, Map<string, ReturnType<typeof setTimeout>>>;
 
+export interface BridgeStatusEvent {
+  project_id: string | null;
+  connected: boolean;
+  retry_in_ms: number | null;
+}
+
+export interface BridgeStatus {
+  connected: boolean;
+  retryInMs: number | null;
+}
+
 interface ProjectEventsStore {
   events: Record<string, PerProjectEvents>;
+  /** Per-project liveness of the `animus daemon stream` bridge. */
+  bridgeStatus: Record<string, BridgeStatus>;
   pushLog: (e: DaemonLogEvent) => void;
   pushCycle: (e: CycleEvent) => void;
   setDaemonStatus: (projectId: string | null, status: string) => void;
   setAgentByPhase: (projectId: string, map: Record<string, string>) => void;
+  setBridgeStatus: (e: BridgeStatusEvent) => void;
 }
 
 const STABLE_EMPTY_AGENT_STATES: Record<string, AgentState> = Object.freeze({});
@@ -196,6 +210,26 @@ function scheduleDecay(
 
 export const useProjectEvents = create<ProjectEventsStore>((set, get) => ({
   events: {},
+  bridgeStatus: {},
+
+  setBridgeStatus: (e) => {
+    const key = e.project_id ?? GLOBAL_BUCKET;
+    const prev = get().bridgeStatus[key];
+    // Avoid re-render churn for repeated identical retry notifications.
+    if (
+      prev &&
+      prev.connected === e.connected &&
+      prev.retryInMs === e.retry_in_ms
+    ) {
+      return;
+    }
+    set({
+      bridgeStatus: {
+        ...get().bridgeStatus,
+        [key]: { connected: e.connected, retryInMs: e.retry_in_ms },
+      },
+    });
+  },
 
   pushLog: (e) => {
     enqueueLog(e, set, get);
@@ -282,4 +316,11 @@ export function useProjectAgentByPhase(
   return useProjectEvents(
     (s) => (s.events[key] ?? STABLE_EMPTY_BUCKET).agentByPhase,
   );
+}
+
+export function useBridgeStatus(
+  projectId: string | null | undefined,
+): BridgeStatus | undefined {
+  const key = projectId ?? GLOBAL_BUCKET;
+  return useProjectEvents((s) => s.bridgeStatus[key]);
 }

@@ -7,6 +7,7 @@ import { AgentFace, type AgentState } from "../../components/AgentFace";
 import { ProviderLogo } from "../../components/ProviderLogo";
 import { CopyButton } from "../../components/CopyButton";
 import { TurnTimeline } from "../../components/TurnTimeline";
+import { QueuePanel } from "../../components/QueuePanel";
 import {
   chatAgentRun,
   chatCancel,
@@ -960,40 +961,14 @@ export function ChatView({ project }: { project: Project }) {
               </button>
             )}
             <div className="cx-col">
-              {queue.length > 0 && (
-                <div className="cx-queue">
-                  <span className="cx-queue__label">
-                    {queuePaused
-                      ? "Queue paused (you stopped the agent)"
-                      : "Queued · sends when the agent is free"}
-                    {queuePaused && (
-                      <button
-                        type="button"
-                        className="cx-queue__resume"
-                        onClick={() => setQueuePaused(false)}
-                        title="Resume sending queued messages"
-                      >
-                        ▶ resume
-                      </button>
-                    )}
-                  </span>
-                  {queue.map((q, i) => (
-                    <div key={i} className="cx-queue__item">
-                      <span className="cx-queue__text">{q}</span>
-                      <button
-                        type="button"
-                        className="cx-queue__rm"
-                        title="Remove"
-                        onClick={() =>
-                          setQueue((cur) => cur.filter((_, j) => j !== i))
-                        }
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <QueuePanel
+                queue={queue}
+                paused={queuePaused}
+                onRemove={(i) =>
+                  setQueue((cur) => cur.filter((_, j) => j !== i))
+                }
+                onResume={() => setQueuePaused(false)}
+              />
               {composer}
             </div>
           </div>

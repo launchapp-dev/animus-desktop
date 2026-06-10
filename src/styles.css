@@ -1652,6 +1652,39 @@ code {
   padding: 16px 20px;
 }
 
+/* live-stream health banner over Journal/Stream */
+.bridge-streambanner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 20px 0;
+  padding: 6px 12px;
+  border: var(--hairline) solid rgba(240, 180, 41, 0.35);
+  border-radius: var(--radius-sm);
+  background: rgba(240, 180, 41, 0.08);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.bridge-streambanner__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--yellow, #f0b429);
+  flex-shrink: 0;
+}
+.bridge-streambanner__btn {
+  margin-left: auto;
+  background: transparent;
+  border: var(--hairline) solid var(--border-strong);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 11px;
+  color: var(--text);
+  cursor: pointer;
+}
+.bridge-streambanner__btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.bridge-streambanner__btn:disabled { opacity: 0.5; cursor: default; }
+
 /* ---------- Command pane (right) ---------- */
 .command-pane {
   grid-area: command;

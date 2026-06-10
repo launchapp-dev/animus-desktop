@@ -10,6 +10,7 @@ import { useProjectsStore } from "./state/projects";
 import { useAddProject } from "./state/useAddProject";
 import {
   useProjectEvents,
+  type BridgeStatusEvent,
   type CycleEvent,
   type DaemonLogEvent,
 } from "./state/projectEvents";
@@ -49,7 +50,8 @@ function AppShell() {
   useEffect(() => {
     const unlisteners: UnlistenFn[] = [];
     let cancelled = false;
-    const { pushLog, pushCycle, setDaemonStatus } = useProjectEvents.getState();
+    const { pushLog, pushCycle, setDaemonStatus, setBridgeStatus } =
+      useProjectEvents.getState();
 
     void (async () => {
       const subs = await Promise.all([
@@ -65,6 +67,9 @@ function AppShell() {
             setDaemonStatus(event.payload.project_id, event.payload.status);
           },
         ),
+        listen<BridgeStatusEvent>("bridge-status", (event) => {
+          setBridgeStatus(event.payload);
+        }),
       ]);
       if (cancelled) {
         subs.forEach((u) => u());

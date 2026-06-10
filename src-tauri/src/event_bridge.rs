@@ -44,6 +44,16 @@ pub struct DaemonStatusChanged {
     pub project_id: Option<String>,
 }
 
+/// Liveness of the per-project `animus daemon stream` bridge, emitted as
+/// `bridge-status` so the UI can surface "live stream disconnected" with a
+/// retry affordance instead of silently showing stale data.
+#[derive(Debug, Clone, Serialize)]
+pub struct BridgeStatusEvent {
+    pub project_id: Option<String>,
+    pub connected: bool,
+    pub retry_in_ms: Option<u64>,
+}
+
 // The full event envelope we forward to the JS side. Most fields come from
 // the top-level keys of the raw daemon JSON. The bridge no longer flattens
 // everything into a single "status" — instead it forwards `cat` verbatim
@@ -214,6 +224,16 @@ async fn run_loop(app: AppHandle, project_id: Option<String>, project_root: Opti
             }
         }
 
+        // Whatever the exit reason, the live stream is down until the next
+        // attempt succeeds — tell the UI so it can offer a retry.
+        let _ = app.emit(
+            "bridge-status",
+            &BridgeStatusEvent {
+                project_id: project_id.clone(),
+                connected: false,
+                retry_in_ms: Some(backoff_ms),
+            },
+        );
         tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
         backoff_ms = (backoff_ms.saturating_mul(2)).min(MAX_BACKOFF_MS);
     }
@@ -271,12 +291,25 @@ async fn run_once(
     let mut window_start = std::time::Instant::now();
     let mut lines_in_window: u32 = 0;
     let mut dropped_in_window: u32 = 0;
+    // Announce liveness once, on the first real line of this attempt.
+    let mut announced_connected = false;
 
     loop {
         tokio::select! {
             line = reader.next_line() => {
                 match line {
                     Ok(Some(text)) => {
+                        if !announced_connected {
+                            announced_connected = true;
+                            let _ = app.emit(
+                                "bridge-status",
+                                &BridgeStatusEvent {
+                                    project_id: project_id.map(|s| s.to_string()),
+                                    connected: true,
+                                    retry_in_ms: None,
+                                },
+                            );
+                        }
                         let now = std::time::Instant::now();
                         if now.duration_since(window_start) >= std::time::Duration::from_secs(1) {
                             if dropped_in_window > 0 {

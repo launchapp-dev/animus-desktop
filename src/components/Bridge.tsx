@@ -17,7 +17,12 @@ import { JournalView } from "../views/project/JournalView";
 import { StreamView } from "../views/project/StreamView";
 import { ChatView } from "../views/project/ChatView";
 import type { Project } from "../types/contracts";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useBridgeStatus } from "../state/projectEvents";
+import {
+  bridgeAttachProject,
+  bridgeDetachProject,
+} from "../api/event_bridge";
 
 const MODE_TABS: { key: BridgeMode; label: string }[] = [
   { key: "chat", label: "Chat" },
@@ -110,6 +115,47 @@ function EmptyHome({ onAddProject }: { onAddProject: () => void }) {
         }}
       >
         + Add project
+      </button>
+    </div>
+  );
+}
+
+/** Banner shown over live views when the `animus daemon stream` bridge is
+ *  down but the daemon claims to be running — otherwise the Journal/Stream
+ *  silently display stale data. "Reconnect now" restarts the bridge task,
+ *  which also resets its retry backoff. */
+function StreamHealthBanner({ project }: { project: Project }) {
+  const status = useBridgeStatus(project.id);
+  const daemon = useDaemonStore((s) => s.status);
+  const [busy, setBusy] = useState(false);
+  if (!daemon?.running || !status || status.connected) return null;
+  const retryIn =
+    status.retryInMs != null ? Math.round(status.retryInMs / 1000) : null;
+  const reconnect = async () => {
+    const path = project.repo_path?.trim();
+    if (!path) return;
+    setBusy(true);
+    try {
+      await bridgeDetachProject(project.id).catch(() => undefined);
+      await bridgeAttachProject(project.id, path);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="bridge-streambanner" role="status">
+      <span className="bridge-streambanner__dot" aria-hidden />
+      <span>
+        Live event stream disconnected
+        {retryIn != null ? ` — retrying in ~${retryIn}s` : ""}
+      </span>
+      <button
+        type="button"
+        className="bridge-streambanner__btn"
+        disabled={busy}
+        onClick={() => void reconnect()}
+      >
+        {busy ? "Reconnecting…" : "Reconnect now"}
       </button>
     </div>
   );
@@ -245,10 +291,16 @@ export function Bridge({ onAddProject }: { onAddProject: () => void }) {
       }
     >
       {project ? (
-        // Keyed by project so EVERY per-project view remounts on switch —
-        // otherwise component state (turns, subjects, open files, runs,
-        // filters, half-filled forms) bleeds from one project into the next.
-        <ProjectModeContent key={project.id} mode={mode} project={project} />
+        <>
+          {(mode === "journal" || mode === "stream") && (
+            <StreamHealthBanner project={project} />
+          )}
+          {/* Keyed by project so EVERY per-project view remounts on switch —
+              otherwise component state (turns, subjects, open files, runs,
+              filters, half-filled forms) bleeds from one project into the
+              next. */}
+          <ProjectModeContent key={project.id} mode={mode} project={project} />
+        </>
       ) : (
         <p style={{ color: "var(--text-muted)", fontSize: 12 }}>
           Project record missing.
