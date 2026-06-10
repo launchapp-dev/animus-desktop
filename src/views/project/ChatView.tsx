@@ -687,6 +687,7 @@ export function ChatView({ project }: { project: Project }) {
         conversationId: convRef.current ?? undefined,
         timeoutSecs: 600,
         reasoningEffort: effort || undefined,
+        agentId: agentId || undefined,
       });
     } catch (e) {
       setTurns((prev) =>

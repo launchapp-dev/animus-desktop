@@ -32,6 +32,8 @@ export function chatAgentRun(args: {
   timeoutSecs?: number;
   /** "low" | "medium" | "high"; omit for the provider default. */
   reasoningEffort?: string;
+  /** Agent profile id — wires the profile's MCP servers (v0.5.12+). */
+  agentId?: string;
 }): Promise<void> {
   return invoke<void>("chat_agent_run", {
     args: {
@@ -43,6 +45,7 @@ export function chatAgentRun(args: {
       conversationId: args.conversationId ?? null,
       timeoutSecs: args.timeoutSecs ?? null,
       reasoningEffort: args.reasoningEffort ?? null,
+      agentId: args.agentId ?? null,
     },
   });
 }

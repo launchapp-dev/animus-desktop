@@ -153,6 +153,9 @@ pub struct ChatRunArgs {
     /// Provider reasoning/thinking effort: "low" | "medium" | "high".
     /// Omitted/empty = provider default (flag not passed).
     pub reasoning_effort: Option<String>,
+    /// Agent profile id — wires the profile's declared MCP servers into the
+    /// chat session (`animus chat send --agent <id>`, v0.5.12+).
+    pub agent_id: Option<String>,
 }
 
 /// Spawn `animus chat send` (v0.5.10+ multi-turn) and stream its JSON event
@@ -203,6 +206,11 @@ pub async fn chat_agent_run(
         let effort = effort.trim().to_ascii_lowercase();
         if matches!(effort.as_str(), "low" | "medium" | "high") {
             cmd.arg("--reasoning-effort").arg(&effort);
+        }
+    }
+    if let Some(agent) = args.agent_id.as_deref() {
+        if !agent.trim().is_empty() {
+            cmd.arg("--agent").arg(agent.trim());
         }
     }
     // Positional message arg comes last.
