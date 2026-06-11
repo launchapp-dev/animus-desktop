@@ -14,6 +14,16 @@ import type { Project } from "../../types/contracts";
 
 const AVATAR_PALETTE = ["#eee8e0", "#d97757", "#e6b34c", "#8ee29a", "#7fa9ff", "#c992d4"];
 
+// YAML writes do read-modify-write on the source file; two concurrent link
+// toggles would drop the first change. Chain every write so each one awaits
+// the previous (global chain — traffic is a human clicking checkboxes).
+let yamlWriteChain: Promise<unknown> = Promise.resolve();
+function enqueueYamlWrite<T>(fn: () => Promise<T>): Promise<T> {
+  const run = yamlWriteChain.then(fn, fn);
+  yamlWriteChain = run.catch(() => undefined);
+  return run;
+}
+
 // Animus transports are stdio (default) or http; OAuth only attaches to http.
 function effectiveTransport(s: McpServerSummary): string {
   if (s.transport) return s.transport.toLowerCase();
@@ -608,7 +618,9 @@ export function McpView({ project }: { project: Project }) {
       const key = `${serverId}:${agent.id}`;
       setLinkBusy(key);
       try {
-        await localMcpLink(agent.sourceFile, agent.id, serverId, linked);
+        await enqueueYamlWrite(() =>
+          localMcpLink(agent.sourceFile, agent.id, serverId, linked),
+        );
         await refresh();
       } catch (e) {
         setError(String(e));
@@ -624,7 +636,7 @@ export function McpView({ project }: { project: Project }) {
       setSaving(true);
       setFormError(null);
       try {
-        await localMcpServerUpsert(targetFile, id, input);
+        await enqueueYamlWrite(() => localMcpServerUpsert(targetFile, id, input));
         setShowAdd(false);
         await refresh();
         setExpanded((prev) => new Set(prev).add(id));

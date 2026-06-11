@@ -274,7 +274,11 @@ async fn read_workflow_spans(logs_dir: &Path) -> Vec<WorkflowSpan> {
         return spans;
     };
     let mut lines = BufReader::new(file).lines();
-    let mut open: Option<WorkflowSpan> = None;
+    // Concurrent workflows interleave their events, so key open spans by
+    // run_id; the anonymous slot only covers events that carry no id at all.
+    let mut open_by_run: std::collections::HashMap<String, WorkflowSpan> =
+        std::collections::HashMap::new();
+    let mut open_anon: Option<WorkflowSpan> = None;
     while let Ok(Some(text)) = lines.next_line().await {
         let t = text.trim();
         if t.is_empty() {
@@ -286,11 +290,17 @@ async fn read_workflow_spans(logs_dir: &Path) -> Vec<WorkflowSpan> {
         let cat = v.get("cat").and_then(|x| x.as_str()).unwrap_or("");
         let ts = v.get("ts").and_then(|x| x.as_str()).unwrap_or("");
         let ms = ts_to_ms(ts);
+        let run_id = v
+            .get("run_id")
+            .and_then(|x| x.as_str())
+            .or_else(|| {
+                v.get("meta")
+                    .and_then(|m| m.get("run_id"))
+                    .and_then(|x| x.as_str())
+            })
+            .map(String::from);
         if cat == "workflow.start" {
-            if let Some(s) = open.take() {
-                spans.push(s);
-            }
-            open = Some(WorkflowSpan {
+            let span = WorkflowSpan {
                 workflow_ref: v
                     .get("meta")
                     .and_then(|m| m.get("workflow_ref"))
@@ -300,16 +310,33 @@ async fn read_workflow_spans(logs_dir: &Path) -> Vec<WorkflowSpan> {
                 start_ms: ms,
                 end_ms: ms,
                 failed: false,
-            });
+            };
+            match run_id {
+                Some(id) => {
+                    if let Some(prev) = open_by_run.insert(id, span) {
+                        spans.push(prev);
+                    }
+                }
+                None => {
+                    if let Some(prev) = open_anon.replace(span) {
+                        spans.push(prev);
+                    }
+                }
+            }
         } else if cat == "workflow.complete" {
-            if let Some(mut s) = open.take() {
+            let closing = match run_id {
+                Some(id) => open_by_run.remove(&id).or_else(|| open_anon.take()),
+                None => open_anon.take(),
+            };
+            if let Some(mut s) = closing {
                 s.end_ms = ms;
                 s.failed = v.get("level").and_then(|x| x.as_str()) == Some("error");
                 spans.push(s);
             }
         }
     }
-    if let Some(s) = open.take() {
+    spans.extend(open_by_run.into_values());
+    if let Some(s) = open_anon.take() {
         spans.push(s);
     }
     spans

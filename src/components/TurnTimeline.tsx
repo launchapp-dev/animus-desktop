@@ -151,6 +151,13 @@ export function TurnTimeline({
                 detail={b.output}
               />
             );
+          case "notice":
+            return (
+              <div key={i} className={`cx-notice cx-notice--${b.level}`}>
+                <span aria-hidden>{b.level === "error" ? "⚠" : "ℹ"}</span>
+                {b.text}
+              </div>
+            );
         }
       })}
     </>

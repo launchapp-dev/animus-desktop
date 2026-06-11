@@ -79,8 +79,10 @@ export function Settings() {
   const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [pluginsLoading, setPluginsLoading] = useState(false);
   const [installingName, setInstallingName] = useState<string | null>(null);
+  const [pluginsError, setPluginsError] = useState<string | null>(null);
   const [tunnelUrl, setTunnelUrl] = useState("");
   const [tunnelSaved, setTunnelSaved] = useState(false);
+  const [tunnelError, setTunnelError] = useState<string | null>(null);
   const [pluginSearch, setPluginSearch] = useState("");
   const [pluginFilter, setPluginFilter] = useState<FilterKey>("all");
 
@@ -94,24 +96,34 @@ export function Settings() {
 
   async function loadPlugins() {
     setPluginsLoading(true);
+    setPluginsError(null);
     try {
       const list = await pluginList();
       setPlugins(list);
+    } catch (e) {
+      setPluginsError(String(e));
     } finally {
       setPluginsLoading(false);
     }
   }
 
   async function loadTunnel() {
-    const url = await settingsGetTunnelUrl();
-    setTunnelUrl(url);
+    try {
+      const url = await settingsGetTunnelUrl();
+      setTunnelUrl(url);
+    } catch (e) {
+      setTunnelError(String(e));
+    }
   }
 
   async function installDefaults() {
     setPluginsLoading(true);
+    setPluginsError(null);
     try {
       const list = await pluginInstallDefaults();
       setPlugins(list);
+    } catch (e) {
+      setPluginsError(String(e));
     } finally {
       setPluginsLoading(false);
     }
@@ -119,18 +131,26 @@ export function Settings() {
 
   async function installOne(name: string) {
     setInstallingName(name);
+    setPluginsError(null);
     try {
       await pluginInstall(name);
       await loadPlugins();
+    } catch (e) {
+      setPluginsError(String(e));
     } finally {
       setInstallingName(null);
     }
   }
 
   async function saveTunnel() {
-    await settingsSetTunnelUrl(tunnelUrl);
-    setTunnelSaved(true);
-    window.setTimeout(() => setTunnelSaved(false), 1800);
+    setTunnelError(null);
+    try {
+      await settingsSetTunnelUrl(tunnelUrl);
+      setTunnelSaved(true);
+      window.setTimeout(() => setTunnelSaved(false), 1800);
+    } catch (e) {
+      setTunnelError(String(e));
+    }
   }
 
   // Merge installed plugins with recommended packs (deduped by name) so the
@@ -282,10 +302,23 @@ export function Settings() {
             <div className="card__actions">
               <Button
                 variant="primary"
-                onClick={() => void auth.startDeviceFlow().then(() => auth.poll())}
+                disabled={auth.polling}
+                onClick={() => {
+                  void auth
+                    .startDeviceFlow()
+                    .then(() => auth.poll())
+                    .catch(() => {
+                      // Surfaced via auth.error below.
+                    });
+                }}
               >
-                Sign in with GitHub
+                {auth.polling ? "Waiting for GitHub…" : "Sign in with GitHub"}
               </Button>
+              {auth.polling && (
+                <Button variant="ghost" onClick={() => auth.cancelPoll()}>
+                  Cancel
+                </Button>
+              )}
             </div>
             {auth.deviceCode && (
               <div className="device-code-card">
@@ -298,6 +331,7 @@ export function Settings() {
                 </div>
               </div>
             )}
+            {auth.error && <p className="mcp-form__error">{auth.error}</p>}
           </>
         )}
       </section>
@@ -327,6 +361,7 @@ export function Settings() {
             Save
           </Button>
         </div>
+        {tunnelError && <p className="mcp-form__error">{tunnelError}</p>}
       </section>
 
       <section className="card">
@@ -344,6 +379,7 @@ export function Settings() {
           Animus ships 348 plugins. Browse what's installed locally and the 11
           recommended workflow packs from the marketplace.
         </p>
+        {pluginsError && <p className="mcp-form__error">{pluginsError}</p>}
         <div className="mt-3 flex items-center gap-2">
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-faint" />

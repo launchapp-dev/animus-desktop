@@ -199,13 +199,17 @@ async fn run_loop(app: AppHandle, project_id: Option<String>, project_root: Opti
     let mut backoff_ms = INITIAL_BACKOFF_MS;
     loop {
         let started = std::time::Instant::now();
-        match run_once(&app, project_id.as_deref(), project_root.as_deref()).await {
+        let result = run_once(&app, project_id.as_deref(), project_root.as_deref()).await;
+        let ran = started.elapsed();
+        // A sustained stream resets the backoff regardless of how it ended —
+        // the child-exit path returns Err, and a long healthy run must not
+        // inherit a stale 30s backoff from earlier failures.
+        if ran.as_secs() >= MIN_HEALTHY_STREAM_SECS {
+            backoff_ms = INITIAL_BACKOFF_MS;
+        }
+        match result {
             Ok(()) => {
-                let ran = started.elapsed();
-                if ran.as_secs() >= MIN_HEALTHY_STREAM_SECS {
-                    // Real connection: the stream genuinely served events.
-                    backoff_ms = INITIAL_BACKOFF_MS;
-                } else {
+                if ran.as_secs() < MIN_HEALTHY_STREAM_SECS {
                     // Fast EOF — no daemon present. Treat as a failure for
                     // backoff purposes so we don't hammer the subprocess
                     // boundary every 500ms.
@@ -239,40 +243,22 @@ async fn run_loop(app: AppHandle, project_id: Option<String>, project_root: Opti
     }
 }
 
-fn animus_binary_path() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    let candidate = PathBuf::from(home).join(".local/bin/animus");
-    if candidate.exists() {
-        return Some(candidate);
-    }
-    let output = std::process::Command::new("which")
-        .arg("animus")
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let path = String::from_utf8(output.stdout).ok()?;
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(PathBuf::from(trimmed))
-    }
-}
-
 async fn run_once(
     app: &AppHandle,
     project_id: Option<&str>,
     project_root: Option<&std::path::Path>,
 ) -> Result<(), String> {
-    let bin = animus_binary_path().ok_or_else(|| "animus binary not found".to_string())?;
+    let bin = crate::daemon::resolve_animus_binary()
+        .await
+        .ok_or_else(|| "animus binary not found".to_string())?;
 
     let mut cmd = Command::new(&bin);
     cmd.arg("daemon").arg("stream").arg("--json");
     if let Some(root) = project_root {
         cmd.arg("--project-root").arg(root);
     }
+    #[cfg(unix)]
+    cmd.process_group(0);
 
     let mut child = cmd
         .stdout(std::process::Stdio::piped())
@@ -325,7 +311,24 @@ async fn run_once(
                             dropped_in_window = 0;
                         }
                         if lines_in_window >= BRIDGE_MAX_LINES_PER_SEC {
-                            dropped_in_window = dropped_in_window.saturating_add(1);
+                            // Terminal events must survive an llm.output
+                            // burst — dropping a `phase.complete` here leaves
+                            // the run stuck in "started" in the UI forever.
+                            if is_terminal_event_line(&text) {
+                                if text.len() > BRIDGE_MAX_LINE_BYTES {
+                                    match stub_oversized_line(&text) {
+                                        Some(stub) => dispatch_line(app, project_id, &stub),
+                                        None => {
+                                            dropped_in_window =
+                                                dropped_in_window.saturating_add(1)
+                                        }
+                                    }
+                                } else {
+                                    dispatch_line(app, project_id, &text);
+                                }
+                            } else {
+                                dropped_in_window = dropped_in_window.saturating_add(1);
+                            }
                         } else if text.len() > BRIDGE_MAX_LINE_BYTES {
                             // Don't drop oversized lines wholesale — a huge
                             // `phase.complete`/`workflow.complete` carries the
@@ -350,6 +353,9 @@ async fn run_once(
                         return Ok(());
                     }
                     Err(e) => {
+                        if let Some(pid) = child.id() {
+                            crate::chat::kill_process_group(pid);
+                        }
                         let _ = child.kill().await;
                         return Err(format!("read stream line: {e}"));
                     }
@@ -390,6 +396,34 @@ async fn drain_remaining_lines(
             dispatch_line(app, project_id, &text);
         }
     }
+}
+
+/// Cheap check for whether a line carries a terminal event (`*.complete`,
+/// `*.timeout`, `plugin.cancel`) — the events the UI needs to settle a run.
+/// A substring pre-filter avoids parsing JSON for the common llm.output case.
+fn is_terminal_event_line(text: &str) -> bool {
+    if !(text.contains(".complete") || text.contains(".timeout") || text.contains("plugin.cancel"))
+    {
+        return false;
+    }
+    let Ok(v) = serde_json::from_str::<Value>(text.trim()) else {
+        return false;
+    };
+    let cat = v
+        .get("data")
+        .and_then(|d| d.get("cat"))
+        .or_else(|| v.get("cat"))
+        .and_then(|c| c.as_str())
+        .unwrap_or("");
+    matches!(
+        cat,
+        "workflow.complete"
+            | "phase.complete"
+            | "plugin.dispatch.complete"
+            | "plugin.dispatch.timeout"
+            | "plugin.cancel"
+            | "command.complete"
+    )
 }
 
 /// Shrink an oversized event line by replacing its heavy payload fields with

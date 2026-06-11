@@ -8,7 +8,8 @@ export type TurnBlock =
   | { kind: "text"; text: string }
   | { kind: "thinking"; text?: string }
   | { kind: "tool_call"; toolName?: string; arguments?: string }
-  | { kind: "tool_result"; toolName?: string; success?: boolean; output?: string };
+  | { kind: "tool_result"; toolName?: string; success?: boolean; output?: string }
+  | { kind: "notice"; level: "warning" | "error"; text: string };
 
 // Provider-reported token usage for one assistant turn.
 export interface ChatUsage {
@@ -198,6 +199,19 @@ export function foldFrame(blocks: TurnBlock[], frame: ChatProtoEvent): TurnBlock
               : undefined,
         },
       ];
+    case "warning":
+    case "error": {
+      const msg = frame.message ?? frame.text;
+      if (!msg) return blocks;
+      return [
+        ...blocks,
+        {
+          kind: "notice",
+          level: frame.type === "error" ? "error" : "warning",
+          text: msg,
+        },
+      ];
+    }
     default:
       return blocks;
   }

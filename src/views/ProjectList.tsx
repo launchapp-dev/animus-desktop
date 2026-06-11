@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
 import { Badge } from "../components/Badge";
 import { Button } from "../components/Button";
 import { EmptyState } from "../components/EmptyState";
 import { Spinner } from "../components/Spinner";
+import { useActiveProject } from "../state/activeProject";
 import { useDaemonStore } from "../state/daemon";
 import { useProjectsStore } from "../state/projects";
 import type { CycleStatus, Project } from "../types/contracts";
@@ -35,9 +35,14 @@ function lastActivityMs(p: Project): number {
 }
 
 function ProjectRow({ project }: { project: Project }) {
+  const setActiveProject = useActiveProject((s) => s.setActiveProject);
   const last = project.last_cycle;
   return (
-    <Link to={`/projects/${project.id}`} className="project-row">
+    <button
+      type="button"
+      onClick={() => setActiveProject(project.id)}
+      className="project-row"
+    >
       <div className="project-row__main">
         <div className="project-row__name">{project.repo_full_name}</div>
         <div className="project-row__meta">
@@ -54,7 +59,7 @@ function ProjectRow({ project }: { project: Project }) {
           {last ? formatRelative(last.started_at) : "—"}
         </span>
       </div>
-    </Link>
+    </button>
   );
 }
 
@@ -79,8 +84,12 @@ function ProjectSection({
   );
 }
 
-export function ProjectList() {
-  const navigate = useNavigate();
+export function ProjectList({
+  onAddProject,
+}: {
+  onAddProject?: () => void;
+}) {
+  const setActiveProject = useActiveProject((s) => s.setActiveProject);
   const { projects, loading, error, refresh } = useProjectsStore();
   const daemon = useDaemonStore((s) => s.status);
   const [showAll, setShowAll] = useState(false);
@@ -126,8 +135,8 @@ export function ProjectList() {
         <div className="view__actions">
           <Button
             variant="primary"
-            onClick={() => navigate("/projects/new")}
-            disabled={!!noDaemon}
+            onClick={() => onAddProject?.()}
+            disabled={!!noDaemon || !onAddProject}
           >
             + Add Project
           </Button>
@@ -150,13 +159,17 @@ export function ProjectList() {
           }
           action={
             noDaemon ? (
-              <Button variant="primary" onClick={() => navigate("/settings")}>
+              <Button
+                variant="primary"
+                onClick={() => setActiveProject("plugins")}
+              >
                 Open settings
               </Button>
             ) : (
               <Button
                 variant="primary"
-                onClick={() => navigate("/projects/new")}
+                onClick={() => onAddProject?.()}
+                disabled={!onAddProject}
               >
                 Add your first project
               </Button>

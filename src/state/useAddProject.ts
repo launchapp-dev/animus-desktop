@@ -53,19 +53,23 @@ export function useAddProject(): AddProjectStatus & { run: () => Promise<void> }
       }
 
       const project = await projectAdoptLocal(picked);
-      addProject(project);
-      setActive(project.id);
 
       try {
         await daemonStart(picked);
       } catch (e) {
         console.warn("[add-project] daemon_start failed:", e);
       }
+      // Attach BEFORE making the project active: the AppShell attach effect
+      // keys off bridgeActiveProjects(), so an already-completed attach makes
+      // it a no-op instead of racing us into a second daemon stream.
       try {
         await bridgeAttachProject(project.id, picked);
       } catch (e) {
         console.warn("[add-project] bridge_attach_project failed:", e);
       }
+
+      addProject(project);
+      setActive(project.id);
     } catch (e) {
       setError(String(e));
     } finally {

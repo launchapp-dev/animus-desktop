@@ -89,9 +89,23 @@ describe("foldFrame", () => {
       { type: "text_delta", text: "hi" },
       { type: "turn_started", conversation_id: "c1" },
       { type: "metadata" },
-      { type: "warning", message: "heads up" },
+      { type: "something_else", message: "heads up" },
     ]);
     expect(blocks).toEqual([{ kind: "text", text: "hi" }]);
+  });
+
+  it("renders warning/error frames as notices", () => {
+    const blocks = fold([
+      { type: "text_delta", text: "hi" },
+      { type: "warning", message: "heads up" },
+      { type: "error", message: "boom" },
+      { type: "warning" },
+    ]);
+    expect(blocks).toEqual([
+      { kind: "text", text: "hi" },
+      { kind: "notice", level: "warning", text: "heads up" },
+      { kind: "notice", level: "error", text: "boom" },
+    ]);
   });
 
   it("maps persisted blocks back to the UI timeline shape (reload parity)", () => {

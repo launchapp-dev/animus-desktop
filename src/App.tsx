@@ -176,7 +176,11 @@ function AppShell() {
           <StatusBar />
         </SidebarInset>
       </SidebarProvider>
-      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        onAddProject={handleAddProject}
+      />
       {addProject.error && (
         <div
           className="alert alert--error"

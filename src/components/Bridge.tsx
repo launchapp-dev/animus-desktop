@@ -128,6 +128,7 @@ function StreamHealthBanner({ project }: { project: Project }) {
   const status = useBridgeStatus(project.id);
   const daemon = useDaemonStore((s) => s.status);
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
   if (!daemon?.running || !status || status.connected) return null;
   const retryIn =
     status.retryInMs != null ? Math.round(status.retryInMs / 1000) : null;
@@ -135,9 +136,13 @@ function StreamHealthBanner({ project }: { project: Project }) {
     const path = project.repo_path?.trim();
     if (!path) return;
     setBusy(true);
+    setFailed(false);
     try {
       await bridgeDetachProject(project.id).catch(() => undefined);
       await bridgeAttachProject(project.id, path);
+    } catch (e) {
+      console.warn("[bridge] reconnect failed:", e);
+      setFailed(true);
     } finally {
       setBusy(false);
     }
@@ -146,8 +151,10 @@ function StreamHealthBanner({ project }: { project: Project }) {
     <div className="bridge-streambanner" role="status">
       <span className="bridge-streambanner__dot" aria-hidden />
       <span>
-        Live event stream disconnected
-        {retryIn != null ? ` — retrying in ~${retryIn}s` : ""}
+        {failed
+          ? "Reconnect failed — live event stream still disconnected"
+          : "Live event stream disconnected"}
+        {!failed && retryIn != null ? ` — retrying in ~${retryIn}s` : ""}
       </span>
       <button
         type="button"
@@ -226,7 +233,7 @@ export function Bridge({ onAddProject }: { onAddProject: () => void }) {
     }
     return (
       <BridgeFrame title="Projects">
-        <ProjectList />
+        <ProjectList onAddProject={onAddProject} />
       </BridgeFrame>
     );
   }

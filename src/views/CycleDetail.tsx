@@ -15,6 +15,10 @@ interface LogLine {
   text: string;
 }
 
+// The backend stream has no unsubscribe; cap retained lines so a long-lived
+// cycle can't grow the array unboundedly.
+const MAX_LOG_LINES = 2000;
+
 function phaseDuration(phase: Phase): string {
   if (!phase.started_at) return "—";
   const start = new Date(phase.started_at).getTime();
@@ -91,14 +95,19 @@ export function CycleDetail() {
     (async () => {
       try {
         const sub = await subscribeCycleLogs(cycleId, (line: BackendLogLine) => {
-          setLogLines((prev) => [
-            ...prev,
-            {
-              ts: Date.now(),
-              phase: line.phase ?? "unknown",
-              text: line.message,
-            },
-          ]);
+          setLogLines((prev) => {
+            const next = [
+              ...prev,
+              {
+                ts: Date.now(),
+                phase: line.phase ?? "unknown",
+                text: line.message,
+              },
+            ];
+            return next.length > MAX_LOG_LINES
+              ? next.slice(next.length - MAX_LOG_LINES)
+              : next;
+          });
         });
         if (cancelled) {
           sub.close();

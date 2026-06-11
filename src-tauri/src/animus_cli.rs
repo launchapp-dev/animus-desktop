@@ -22,6 +22,21 @@ pub struct AnimusCliResult {
     pub raw_stderr: String,
 }
 
+/// Trim + cap CLI output before embedding it in an error string, so a noisy
+/// child can't balloon error payloads (or echo sensitive output back whole).
+pub(crate) fn truncate_output(s: &str) -> String {
+    const MAX: usize = 500;
+    let t = s.trim();
+    if t.len() <= MAX {
+        return t.to_string();
+    }
+    let mut end = MAX;
+    while !t.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}… [{} more bytes]", &t[..end], t.len() - end)
+}
+
 fn animus_binary() -> PathBuf {
     if let Some(home) = dirs::home_dir() {
         let local = home.join(".local").join("bin").join("animus");
@@ -74,16 +89,18 @@ async fn run_animus_json(path: &str, args: &[&str]) -> Result<AnimusCliResult, S
         return Err(format!(
             "animus returned no stdout (status={:?}, stderr={})",
             output.status.code(),
-            stderr.trim()
+            truncate_output(&stderr)
         ));
     }
 
+    // Never embed raw stdout here — secret get/set responses flow through
+    // this path and must not be echoed back in error strings.
     let envelope: Value = serde_json::from_str(stdout.trim()).map_err(|e| {
         format!(
-            "animus output is not JSON: {} (raw='{}', stderr='{}')",
+            "animus output is not JSON: {} (stdout {} bytes, stderr='{}')",
             e,
-            stdout.trim(),
-            stderr.trim()
+            stdout.trim().len(),
+            truncate_output(&stderr)
         )
     })?;
 

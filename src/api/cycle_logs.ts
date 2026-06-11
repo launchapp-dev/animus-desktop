@@ -11,12 +11,18 @@ export async function subscribeCycleLogs(
   cycleId: string,
   handler: CycleLogHandler,
 ): Promise<CycleLogSubscription> {
-  const channel = new Channel<LogLine>();
+  let channel: Channel<LogLine> | null = new Channel<LogLine>();
   channel.onmessage = handler;
   await invoke("cycle_logs_subscribe", { cycleId, onEvent: channel });
   return {
     close: () => {
-      channel.onmessage = () => {};
+      // No backend unsubscribe command exists; the Rust stream stops only
+      // when the process ends. Detach the handler and drop the channel
+      // reference so closed subscriptions can't retain the consumer.
+      if (channel) {
+        channel.onmessage = () => {};
+        channel = null;
+      }
     },
   };
 }

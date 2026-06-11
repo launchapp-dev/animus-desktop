@@ -91,6 +91,15 @@ export function SubjectsView({ project }: { project: Project }) {
     }
   }, [kind, path]);
 
+  // Mutation handlers (status change, delete, create) can resolve after a
+  // kind switch; calling through this ref makes the post-mutation refresh use
+  // the CURRENT kind instead of a stale closure, so it can't bleed old-kind
+  // data into the list (the seq token then settles the race as usual).
+  const refreshRef = useRef(refresh);
+  useEffect(() => {
+    refreshRef.current = refresh;
+  }, [refresh]);
+
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -153,7 +162,7 @@ export function SubjectsView({ project }: { project: Project }) {
         setCBody("");
         setCPriority("p2");
         setShowCreate(false);
-        await refresh();
+        await refreshRef.current();
       }
     } finally {
       setCreateBusy(false);
@@ -167,7 +176,7 @@ export function SubjectsView({ project }: { project: Project }) {
     try {
       const res = await subjectSetStatus(kind, s.id, status, path);
       if (!res.ok) setError(res.error ?? "status change failed");
-      else await refresh();
+      else await refreshRef.current();
     } finally {
       setBusyId(null);
     }
@@ -182,7 +191,7 @@ export function SubjectsView({ project }: { project: Project }) {
       if (!res.ok) setError(res.error ?? "delete failed");
       else {
         setPendingDelete(null);
-        await refresh();
+        await refreshRef.current();
       }
     } finally {
       setBusyId(null);

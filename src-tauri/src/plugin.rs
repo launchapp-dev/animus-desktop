@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use tauri::{AppHandle, Emitter};
 use tokio::process::Command;
 
@@ -23,28 +22,6 @@ fn emit_progress(app: &AppHandle, stage: &str, percent: Option<u8>, message: &st
         message: message.to_string(),
     };
     let _ = app.emit("install-progress", payload);
-}
-
-fn animus_binary_path() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    let candidate = PathBuf::from(home).join(".local/bin/animus");
-    if candidate.exists() {
-        return Some(candidate);
-    }
-    let output = std::process::Command::new("which")
-        .arg("animus")
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let path = String::from_utf8(output.stdout).ok()?;
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(PathBuf::from(trimmed))
-    }
 }
 
 fn parse_plugin(value: &serde_json::Value) -> Option<Plugin> {
@@ -110,7 +87,7 @@ fn extract_plugins_array(json: &serde_json::Value) -> Vec<serde_json::Value> {
 
 #[tauri::command]
 pub async fn plugin_list() -> Result<Vec<Plugin>, String> {
-    let bin = animus_binary_path().ok_or_else(|| "animus binary not found".to_string())?;
+    let bin = crate::daemon::resolve_animus_binary().await.ok_or_else(|| "animus binary not found".to_string())?;
     let output = Command::new(&bin)
         .arg("plugin")
         .arg("list")
@@ -141,7 +118,7 @@ pub async fn plugin_list() -> Result<Vec<Plugin>, String> {
 
 #[tauri::command]
 pub async fn plugin_install(app: AppHandle, name: String) -> Result<(), String> {
-    let bin = animus_binary_path().ok_or_else(|| "animus binary not found".to_string())?;
+    let bin = crate::daemon::resolve_animus_binary().await.ok_or_else(|| "animus binary not found".to_string())?;
     emit_progress(&app, "downloading", Some(10), &format!("Installing {name}"));
     let output = Command::new(&bin)
         .arg("plugin")
@@ -164,7 +141,7 @@ pub async fn plugin_install(app: AppHandle, name: String) -> Result<(), String> 
 
 #[tauri::command]
 pub async fn plugin_install_defaults(app: AppHandle) -> Result<(), String> {
-    let bin = animus_binary_path().ok_or_else(|| "animus binary not found".to_string())?;
+    let bin = crate::daemon::resolve_animus_binary().await.ok_or_else(|| "animus binary not found".to_string())?;
     emit_progress(
         &app,
         "downloading",

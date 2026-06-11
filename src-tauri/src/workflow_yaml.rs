@@ -961,7 +961,7 @@ fn build_mcp_entry(input: &McpServerInput) -> Mapping {
 /// `.animus/` directory — `source_file` is frontend-supplied, and without
 /// this check a buggy/compromised renderer could overwrite any YAML-shaped
 /// file the user owns.
-fn validate_animus_yaml_path(path: &std::path::Path) -> Result<(), String> {
+pub(crate) fn validate_animus_yaml_path(path: &std::path::Path) -> Result<(), String> {
     use std::path::Component;
     let ext_ok = path
         .extension()
@@ -977,16 +977,58 @@ fn validate_animus_yaml_path(path: &std::path::Path) -> Result<(), String> {
     {
         return Err("source_file may not contain `..`".into());
     }
-    if !path
-        .components()
-        .any(|c| matches!(c, Component::Normal(n) if n == ".animus"))
-    {
+    let confined = |p: &std::path::Path| {
+        p.components()
+            .any(|c| matches!(c, Component::Normal(n) if n == ".animus"))
+    };
+    if !confined(path) {
+        return Err(format!(
+            "{}: writes are confined to a project's .animus/ directory",
+            path.display()
+        ));
+    }
+    // Canonicalize (resolving symlinks) and re-check: a symlinked file or
+    // ancestor inside .animus/ must not redirect the write elsewhere. The
+    // target may not exist yet (create flows), so resolve the nearest
+    // existing ancestor and re-append the missing tail.
+    let resolved = canonicalize_allowing_missing_tail(path)?;
+    if !confined(&resolved) {
         return Err(format!(
             "{}: writes are confined to a project's .animus/ directory",
             path.display()
         ));
     }
     Ok(())
+}
+
+fn canonicalize_allowing_missing_tail(path: &std::path::Path) -> Result<PathBuf, String> {
+    let mut base = path.to_path_buf();
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    loop {
+        match base.canonicalize() {
+            Ok(canon) => {
+                let mut out = canon;
+                for part in tail.iter().rev() {
+                    out.push(part);
+                }
+                return Ok(out);
+            }
+            Err(_) => {
+                // Present-but-unresolvable (e.g. a dangling symlink) is a
+                // redirect we cannot verify — refuse rather than walk past it.
+                if base.symlink_metadata().is_ok() {
+                    return Err(format!("cannot resolve {}", path.display()));
+                }
+                match (base.file_name(), base.parent()) {
+                    (Some(name), Some(parent)) if !parent.as_os_str().is_empty() => {
+                        tail.push(name.to_os_string());
+                        base = parent.to_path_buf();
+                    }
+                    _ => return Err(format!("cannot resolve {}", path.display())),
+                }
+            }
+        }
+    }
 }
 
 /// Best-effort `.bak` snapshot before rewriting a hand-editable YAML file —

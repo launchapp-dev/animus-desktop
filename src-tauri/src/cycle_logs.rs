@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::ipc::Channel;
@@ -14,28 +12,6 @@ pub struct LogLine {
     pub level: Option<String>,
     pub phase: Option<String>,
     pub message: String,
-}
-
-fn animus_binary_path() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    let candidate = PathBuf::from(home).join(".local/bin/animus");
-    if candidate.exists() {
-        return Some(candidate);
-    }
-    let output = std::process::Command::new("which")
-        .arg("animus")
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let path = String::from_utf8(output.stdout).ok()?;
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(PathBuf::from(trimmed))
-    }
 }
 
 fn parse_log_line(raw: &str, fallback_cycle: &str) -> Option<LogLine> {
@@ -109,7 +85,7 @@ pub async fn cycle_logs_subscribe(
     cycle_id: String,
     on_event: Channel<LogLine>,
 ) -> Result<(), String> {
-    let bin = animus_binary_path().ok_or_else(|| "animus binary not found".to_string())?;
+    let bin = crate::daemon::resolve_animus_binary().await.ok_or_else(|| "animus binary not found".to_string())?;
 
     let mut child = Command::new(&bin)
         .arg("daemon")

@@ -26,8 +26,17 @@ let refreshInFlight: Promise<void> | null = null;
 // Monotonic op counter: a slow background `refresh` that started BEFORE an
 // install/start/stop must not land afterwards and overwrite the fresh
 // post-mutation status with a stale snapshot ("daemon down" right after the
-// user started it).
+// user started it). A stale refresh must not touch `loading` either — the
+// mutation that bumped the seq owns it.
 let opSeq = 0;
+
+// Mutations invalidate the in-flight dedup so a refresh() issued after (or
+// during) a mutation starts a fresh status call instead of folding onto a
+// pre-mutation promise whose result will be discarded.
+function beginOp() {
+  opSeq++;
+  refreshInFlight = null;
+}
 
 export const useDaemonStore = create<DaemonState>((set) => ({
   status: null,
@@ -36,51 +45,54 @@ export const useDaemonStore = create<DaemonState>((set) => ({
   refresh: async () => {
     if (refreshInFlight) return refreshInFlight;
     const seq = opSeq;
-    refreshInFlight = (async () => {
+    let promise: Promise<void> | null = null;
+    promise = (async () => {
       set({ loading: true, error: null });
       try {
         const status = await daemonStatus();
         if (seq === opSeq) set({ status, loading: false });
-        else set({ loading: false });
       } catch (e) {
         if (seq === opSeq) set({ error: String(e), loading: false });
-        else set({ loading: false });
       } finally {
-        refreshInFlight = null;
+        if (refreshInFlight === promise) refreshInFlight = null;
       }
     })();
-    return refreshInFlight;
+    refreshInFlight = promise;
+    return promise;
   },
   install: async () => {
-    opSeq++;
+    beginOp();
     set({ loading: true, error: null });
     try {
       const status = await daemonInstall();
-      opSeq++;
+      beginOp();
       set({ status, loading: false });
     } catch (e) {
+      beginOp();
       set({ error: String(e), loading: false });
     }
   },
   start: async () => {
-    opSeq++;
+    beginOp();
     set({ loading: true, error: null });
     try {
       const status = await daemonStart();
-      opSeq++;
+      beginOp();
       set({ status, loading: false });
     } catch (e) {
+      beginOp();
       set({ error: String(e), loading: false });
     }
   },
   stop: async () => {
-    opSeq++;
+    beginOp();
     set({ loading: true, error: null });
     try {
       const status = await daemonStop();
-      opSeq++;
+      beginOp();
       set({ status, loading: false });
     } catch (e) {
+      beginOp();
       set({ error: String(e), loading: false });
     }
   },

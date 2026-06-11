@@ -12,9 +12,20 @@ import type {
 
 /**
  * Typed wrapper around Tauri's `invoke`. Falls back to a provided default value
- * if the backend command does not exist yet, so the UI is fully testable
- * before backend integration completes.
+ * only when the backend command does not exist yet (or we're not running
+ * inside Tauri at all, e.g. vitest/browser), so the UI is testable before
+ * backend integration completes. Real errors from existing commands propagate.
  */
+function isTauriRuntime(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+function isMissingCommandError(cmd: string, e: unknown): boolean {
+  const msg =
+    typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
+  return msg.includes(`Command ${cmd} not found`);
+}
+
 export async function safeInvoke<T>(
   cmd: string,
   args?: Record<string, unknown>,
@@ -23,8 +34,11 @@ export async function safeInvoke<T>(
   try {
     return await invoke<T>(cmd, args);
   } catch (e) {
-    if (fallback !== undefined) {
-      console.warn(`[_invoke] ${cmd} failed, using fallback:`, e);
+    if (
+      fallback !== undefined &&
+      (!isTauriRuntime() || isMissingCommandError(cmd, e))
+    ) {
+      console.warn(`[_invoke] ${cmd} unavailable, using fallback:`, e);
       return fallback;
     }
     throw e;
@@ -261,22 +275,12 @@ export const githubAuthStart = () =>
   });
 
 export const githubAuthPoll = (deviceCode: string) =>
-  safeInvoke<AuthStatus>(
-    "github_auth_poll",
-    { deviceCode },
-    {
-      logged_in: true,
-      login: "mock-user",
-      avatar_url: "https://avatars.githubusercontent.com/u/0?v=4",
-    },
-  );
+  safeInvoke<AuthStatus>("github_auth_poll", { deviceCode });
 
-export const githubAuthLogout = () =>
-  safeInvoke<AuthStatus>("github_auth_logout", undefined, {
-    logged_in: false,
-    login: null,
-    avatar_url: null,
-  });
+export const githubAuthLogout = async (): Promise<AuthStatus> => {
+  await safeInvoke<null>("github_logout", undefined, null);
+  return { logged_in: false, login: null, avatar_url: null };
+};
 
 // GitHub repos + webhooks
 export const githubListRepos = () =>

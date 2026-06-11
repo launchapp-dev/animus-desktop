@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::process::Stdio;
 
 use serde::{Deserialize, Serialize};
@@ -14,30 +13,8 @@ pub struct WorkflowRunResult {
     pub run_id: Option<String>,
 }
 
-fn animus_binary_path() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    let candidate = PathBuf::from(home).join(".local/bin/animus");
-    if candidate.exists() {
-        return Some(candidate);
-    }
-    let output = std::process::Command::new("which")
-        .arg("animus")
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let path = String::from_utf8(output.stdout).ok()?;
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(PathBuf::from(trimmed))
-    }
-}
-
 async fn run_animus(args: &[&str], project_root: Option<&str>) -> Result<Value, String> {
-    let bin = animus_binary_path().ok_or_else(|| "animus binary not found".to_string())?;
+    let bin = crate::daemon::resolve_animus_binary().await.ok_or_else(|| "animus binary not found".to_string())?;
     let mut cmd = Command::new(&bin);
     for arg in args {
         cmd.arg(arg);
@@ -56,7 +33,7 @@ async fn run_animus(args: &[&str], project_root: Option<&str>) -> Result<Value, 
         return Err(format!(
             "animus {} failed: {}",
             args.join(" "),
-            stderr.trim()
+            crate::animus_cli::truncate_output(&stderr)
         ));
     }
     let text = String::from_utf8_lossy(&output.stdout);

@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import {
   FolderGit2,
   GitBranch,
@@ -24,15 +23,21 @@ import {
 import { pluginList } from "../api/_invoke";
 import { useDaemonStore } from "../state/daemon";
 import { useProjectsStore } from "../state/projects";
+import { useActiveProject } from "../state/activeProject";
 import type { Plugin } from "../types/contracts";
 
 interface CommandPaletteProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onAddProject: () => void;
 }
 
-export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
-  const navigate = useNavigate();
+export function CommandPalette({
+  open,
+  onOpenChange,
+  onAddProject,
+}: CommandPaletteProps) {
+  const setActiveProject = useActiveProject((s) => s.setActiveProject);
   const projects = useProjectsStore((s) => s.projects);
   const daemon = useDaemonStore();
   const [plugins, setPlugins] = useState<Plugin[]>([]);
@@ -40,9 +45,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    void pluginList().then((list) => {
-      if (!cancelled) setPlugins(list);
-    });
+    void pluginList()
+      .then((list) => {
+        if (!cancelled) setPlugins(list);
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -66,7 +73,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         <CommandGroup heading="Actions">
           <CommandItem
             value="add-project new project"
-            onSelect={() => runAndClose(() => navigate("/projects/new"))}
+            onSelect={() => runAndClose(onAddProject)}
           >
             <Plus className="text-text-muted" />
             <span>Add project</span>
@@ -74,7 +81,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           </CommandItem>
           <CommandItem
             value="open-settings"
-            onSelect={() => runAndClose(() => navigate("/settings"))}
+            onSelect={() => runAndClose(() => setActiveProject("plugins"))}
           >
             <SettingsIcon className="text-text-muted" />
             <span>Open Settings</span>
@@ -121,7 +128,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           </CommandItem>
           <CommandItem
             value="daemon-logs"
-            onSelect={() => runAndClose(() => navigate("/settings"))}
+            onSelect={() => runAndClose(() => setActiveProject("plugins"))}
           >
             <Terminal className="text-text-muted" />
             <span>Open daemon logs</span>
@@ -137,7 +144,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   key={p.id}
                   value={`project ${p.repo_full_name} ${p.language}`}
                   onSelect={() =>
-                    runAndClose(() => navigate(`/projects/${p.id}`))
+                    runAndClose(() => setActiveProject(p.id))
                   }
                 >
                   <FolderGit2 className="text-text-muted" />
@@ -160,9 +167,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   key={cycle.id}
                   value={`cycle ${project.repo_full_name} ${cycle.id} ${cycle.status}`}
                   onSelect={() =>
-                    runAndClose(() =>
-                      navigate(`/projects/${project.id}/cycles/${cycle.id}`),
-                    )
+                    runAndClose(() => setActiveProject(project.id))
                   }
                 >
                   <GitBranch className="text-text-muted" />
@@ -186,7 +191,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 <CommandItem
                   key={p.name}
                   value={`plugin ${p.name} ${p.kind}`}
-                  onSelect={() => runAndClose(() => navigate("/settings"))}
+                  onSelect={() => runAndClose(() => setActiveProject("plugins"))}
                 >
                   <Plug className="text-text-muted" />
                   <span className="flex-1 truncate">{p.name}</span>

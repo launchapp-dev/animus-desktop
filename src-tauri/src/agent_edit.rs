@@ -72,6 +72,7 @@ pub async fn local_agent_update(
     update: AgentUpdate,
 ) -> Result<AgentUpdateResult, String> {
     let path = PathBuf::from(source_file.trim());
+    crate::workflow_yaml::validate_animus_yaml_path(&path)?;
     if !path.is_file() {
         return Err(format!("{} is not a file", path.display()));
     }

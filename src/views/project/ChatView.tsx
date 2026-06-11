@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { create } from "zustand";
+import { listen } from "@tauri-apps/api/event";
 import { Sparkles, Paperclip, ArrowDown, Brain } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useHotkeys } from "react-hotkeys-hook";
@@ -48,14 +49,17 @@ interface ChatTurn {
   stopped?: boolean;
 }
 
-/** Per-session bookkeeping for an in-flight `chat send`. `convId` is the
- *  conversation that OWNS the session (null until the CLI reports the id of a
- *  freshly-created one) — stream frames must never clobber `convRef` for a
- *  different conversation the user has since opened. `pendingTitle` rides
- *  with the session so auto-naming can only ever rename its own conversation. */
+/** Per-session bookkeeping for an in-flight `chat send`. `convKey` is the
+ *  bucket of the conversation that OWNS the session ("new" until the CLI
+ *  reports the id of a freshly-created one) — stream frames must never
+ *  clobber the viewed conversation the user has since opened. `pendingTitle`
+ *  rides with the session so auto-naming can only ever rename its own
+ *  conversation. */
 interface SessionEntry {
+  projectId: string;
+  repoPath: string;
   turnId: string;
-  convId: string | null;
+  convKey: string;
   pendingTitle: string | null;
 }
 
@@ -69,6 +73,176 @@ function nextSessionId(): string {
 // updates its `project` prop without always remounting, so component state
 // alone would lose the draft). Session-lifetime, in-memory.
 const composerDrafts = new Map<string, string>();
+
+interface ChatHarness {
+  tool: string;
+  model: string;
+  agentId: string;
+  effort: string;
+}
+
+interface ProjectChat {
+  /** Conversation being viewed: a conversation id, or "new". */
+  viewing: string;
+  /** Turn lists per conversation key — frames keep landing in the owning
+   *  bucket even when the user is viewing a different conversation. */
+  buckets: Record<string, ChatTurn[]>;
+  queue: string[];
+  queuePaused: boolean;
+  activeSession: string | null;
+  harness: ChatHarness | null;
+}
+
+// Chat state lives OUTSIDE the component: Bridge remounts ChatView on every
+// project/tab switch, and an in-flight `chat send` must survive that — the
+// turn keeps streaming, stays stoppable, and queued messages aren't lost.
+const useChatStore = create<{ projects: Record<string, ProjectChat> }>(() => ({
+  projects: {},
+}));
+
+const EMPTY_PROJECT_CHAT: ProjectChat = {
+  viewing: "new",
+  buckets: {},
+  queue: [],
+  queuePaused: false,
+  activeSession: null,
+  harness: null,
+};
+const EMPTY_TURNS: ChatTurn[] = [];
+
+function patchChat(
+  projectId: string,
+  patch: (pc: ProjectChat) => Partial<ProjectChat>,
+) {
+  useChatStore.setState((s) => {
+    const pc = s.projects[projectId] ?? EMPTY_PROJECT_CHAT;
+    return {
+      projects: { ...s.projects, [projectId]: { ...pc, ...patch(pc) } },
+    };
+  });
+}
+
+function patchTurn(
+  projectId: string,
+  convKey: string,
+  turnId: string,
+  patch: (t: ChatTurn) => ChatTurn,
+) {
+  patchChat(projectId, (pc) => {
+    const turns = pc.buckets[convKey];
+    if (!turns) return {};
+    return {
+      buckets: {
+        ...pc.buckets,
+        [convKey]: turns.map((t) => (t.id === turnId ? patch(t) : t)),
+      },
+    };
+  });
+}
+
+// Live sessions keyed by sessionId — module-global so frames route to the
+// right project/conversation even while no ChatView is mounted.
+const sessions = new Map<string, SessionEntry>();
+
+function handleStreamLine({ sessionId, raw }: ChatStreamLine) {
+  const entry = sessions.get(sessionId);
+  if (!entry) return;
+  let frame: ChatProtoEvent;
+  try {
+    frame = JSON.parse(raw) as ChatProtoEvent;
+  } catch {
+    return;
+  }
+  if (frame.type === "turn_started" || frame.type === "turn_completed") {
+    // Adopt the CLI-reported conversation id: rename the session's bucket
+    // (and follow with the user's view + draft only if they are still on it
+    // — otherwise a finishing background turn would yank the target of the
+    // user's NEXT message back to an old conversation).
+    if (frame.conversation_id && frame.conversation_id !== entry.convKey) {
+      const oldKey = entry.convKey;
+      const newKey = frame.conversation_id;
+      entry.convKey = newKey;
+      const draft = composerDrafts.get(`${entry.projectId}:${oldKey}`);
+      if (draft !== undefined) {
+        composerDrafts.set(`${entry.projectId}:${newKey}`, draft);
+        composerDrafts.delete(`${entry.projectId}:${oldKey}`);
+      }
+      patchChat(entry.projectId, (pc) => {
+        const buckets = { ...pc.buckets };
+        const moved = buckets[oldKey];
+        if (moved) {
+          delete buckets[oldKey];
+          buckets[newKey] = moved;
+        }
+        return {
+          buckets,
+          viewing: pc.viewing === oldKey ? newKey : pc.viewing,
+        };
+      });
+    }
+    if (frame.type === "turn_completed" && entry.pendingTitle) {
+      // Auto-name the session's OWN conversation (never whatever the user
+      // happens to be viewing now).
+      const title = entry.pendingTitle;
+      entry.pendingTitle = null;
+      if (entry.convKey !== "new") {
+        void chatRename(entry.repoPath, entry.convKey, title)
+          .catch(() => {})
+          .finally(() =>
+            window.dispatchEvent(new Event("animus-chat-updated")),
+          );
+      }
+    }
+    return;
+  }
+  if (frame.type === "metadata") {
+    patchTurn(entry.projectId, entry.convKey, entry.turnId, (t) => ({
+      ...t,
+      usage: frame.tokens ?? t.usage,
+      cost: frame.cost_usd ?? t.cost,
+    }));
+    return;
+  }
+  patchTurn(entry.projectId, entry.convKey, entry.turnId, (t) => ({
+    ...t,
+    blocks: foldFrame(t.blocks, frame),
+  }));
+}
+
+function handleStreamEnd({ sessionId, exitCode, error }: ChatStreamEnd) {
+  const entry = sessions.get(sessionId);
+  if (!entry) return;
+  sessions.delete(sessionId);
+  // A user-initiated stop is not a failure: settle the turn as done (with a
+  // "stopped" marker) instead of leaving it spinning or red.
+  const wasCancelled = error === "cancelled";
+  patchTurn(entry.projectId, entry.convKey, entry.turnId, (t) =>
+    wasCancelled
+      ? { ...t, status: "done", error: null, stopped: true }
+      : {
+          ...t,
+          status:
+            error || (exitCode != null && exitCode !== 0) ? "error" : "done",
+          error,
+        },
+  );
+  patchChat(entry.projectId, (pc) =>
+    pc.activeSession === sessionId ? { activeSession: null } : {},
+  );
+  window.dispatchEvent(new Event("animus-chat-updated"));
+}
+
+let streamListenersStarted = false;
+function ensureStreamListeners() {
+  if (streamListenersStarted) return;
+  streamListenersStarted = true;
+  void listen<ChatStreamLine>("chat-stream", (ev) =>
+    handleStreamLine(ev.payload),
+  );
+  void listen<ChatStreamEnd>("chat-stream-end", (ev) =>
+    handleStreamEnd(ev.payload),
+  );
+}
 
 /** The master/orchestrator gets an intentional gradient orb with a glyph,
  *  not a random generated face. Real agents keep their AgentFace. */
@@ -331,26 +505,35 @@ function Composer({
 export function ChatView({ project }: { project: Project }) {
   const [providers, setProviders] = useState<ProviderOption[]>([]);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
-  const [tool, setTool] = useState("claude");
-  const [model, setModel] = useState<string>("");
+  const pc = useChatStore((s) => s.projects[project.id]) ?? EMPTY_PROJECT_CHAT;
+  const { viewing, queue, queuePaused, activeSession } = pc;
+  const turns = pc.buckets[viewing] ?? EMPTY_TURNS;
+  const tool = pc.harness?.tool ?? "claude";
+  const model = pc.harness?.model ?? "";
+  const agentId = pc.harness?.agentId ?? "";
   // Reasoning effort for the NEXT turn ("" = provider default).
-  const [effort, setEffort] = useState<string>("");
-  const [agentId, setAgentId] = useState<string>("");
-  const [prompt, setPrompt] = useState(
-    () => composerDrafts.get(`${project.id}:new`) ?? "",
+  const effort = pc.harness?.effort ?? "";
+  const setHarness = useCallback(
+    (patch: Partial<ChatHarness>) =>
+      patchChat(project.id, (cur) => ({
+        harness: {
+          tool: "claude",
+          model: "",
+          agentId: "",
+          effort: "",
+          ...cur.harness,
+          ...patch,
+        },
+      })),
+    [project.id],
   );
-  const [turns, setTurns] = useState<ChatTurn[]>([]);
-  const [queue, setQueue] = useState<string[]>([]);
-  // Stopping a turn pauses the queue so the next message doesn't instantly
-  // auto-fire at an agent the user just halted. Cleared on the next submit
-  // or via the explicit resume affordance.
-  const [queuePaused, setQueuePaused] = useState(false);
-  const [activeSession, setActiveSession] = useState<string | null>(null);
-  const turnsRef = useRef<Map<string, SessionEntry>>(new Map());
-  const convRef = useRef<string | null>(null);
-  // Latest repo path for use inside the once-registered stream listeners.
-  const projectPathRef = useRef(project.repo_path);
-  projectPathRef.current = project.repo_path;
+  const [prompt, setPrompt] = useState(() => {
+    const v = useChatStore.getState().projects[project.id]?.viewing ?? "new";
+    return composerDrafts.get(`${project.id}:${v}`) ?? "";
+  });
+  // Guards openConversation against out-of-order responses: only the latest
+  // open (or "+ New") may apply its transcript.
+  const openSeqRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [atBottom, setAtBottom] = useState(true);
@@ -364,8 +547,8 @@ export function ChatView({ project }: { project: Project }) {
   // — an unsent message stays with its conversation across project/tab and
   // conversation switches. The "new" bucket holds the not-yet-started draft.
   const draftKey = useCallback(
-    () => `${project.id}:${convRef.current ?? "new"}`,
-    [project.id],
+    () => `${project.id}:${viewing}`,
+    [project.id, viewing],
   );
   const setPromptAndDraft = useCallback(
     (v: string) => {
@@ -379,7 +562,7 @@ export function ChatView({ project }: { project: Project }) {
   const restoreDraft = useCallback(() => {
     setPrompt(composerDrafts.get(draftKey()) ?? "");
   }, [draftKey]);
-  // Restore on project change (the component may not remount).
+  // Restore on project/conversation change (the component may not remount).
   useEffect(() => {
     restoreDraft();
   }, [restoreDraft]);
@@ -388,8 +571,10 @@ export function ChatView({ project }: { project: Project }) {
     async (id: string) => {
       const path = project.repo_path?.trim();
       if (!path) return;
+      const seq = ++openSeqRef.current;
       try {
         const t = await chatGet(path, id);
+        if (seq !== openSeqRef.current) return;
         // Reconstruct turns: pair each user message with the following
         // assistant reply. Loaded history shows final messages (no live
         // tool activity — that wasn't persisted per-turn).
@@ -422,24 +607,51 @@ export function ChatView({ project }: { project: Project }) {
             cur.cost = m.cost_usd ?? cur.cost;
           }
         }
-        setTurns(out);
-        setQueue([]);
-        convRef.current = id;
-        setPrompt(composerDrafts.get(`${project.id}:${id}`) ?? "");
-        if (t.meta.tool) setTool(t.meta.tool);
-        if (t.meta.model) setModel(t.meta.model);
+        patchChat(project.id, (pcur) => {
+          // Keep any still-running live turn of this conversation on top of
+          // the reloaded history (its prompt isn't persisted yet — drop the
+          // bare history stub if one exists).
+          const live = (pcur.buckets[id] ?? []).filter(
+            (x) => x.status === "running",
+          );
+          const hist = live.length
+            ? out.filter(
+                (o) =>
+                  !(o.blocks.length === 0 &&
+                    live.some((l) => l.prompt === o.prompt)),
+              )
+            : out;
+          return {
+            buckets: { ...pcur.buckets, [id]: [...hist, ...live] },
+            viewing: id,
+            queue: [],
+          };
+        });
+        if (t.meta.tool || t.meta.model) {
+          setHarness({
+            ...(t.meta.tool ? { tool: t.meta.tool } : {}),
+            ...(t.meta.model ? { model: t.meta.model } : {}),
+          });
+        }
       } catch (e) {
         console.warn("[chat] open conversation failed", e);
       }
     },
-    [project.repo_path, project.id],
+    [project.repo_path, project.id, setHarness],
   );
 
   const newConversation = useCallback(() => {
-    setTurns([]);
-    setQueue([]);
-    convRef.current = null;
-    setPrompt(composerDrafts.get(`${project.id}:new`) ?? "");
+    openSeqRef.current += 1;
+    patchChat(project.id, (pcur) => ({
+      viewing: "new",
+      queue: [],
+      buckets: {
+        ...pcur.buckets,
+        new: (pcur.buckets["new"] ?? EMPTY_TURNS).filter(
+          (t) => t.status === "running",
+        ),
+      },
+    }));
   }, [project.id]);
 
   // The left rail can request a conversation to open (or a fresh one). Honor it
@@ -455,17 +667,28 @@ export function ChatView({ project }: { project: Project }) {
   }, [pendingConversation, newConversation, openConversation, clearPendingConversation]);
 
   useEffect(() => {
+    ensureStreamListeners();
+  }, []);
+
+  useEffect(() => {
     chatProviders()
       .then((p) => {
         setProviders(p);
         const firstInstalled = p.find((x) => x.installed) ?? p[0];
-        if (firstInstalled) {
-          setTool(firstInstalled.tool);
-          setModel(firstInstalled.models[0] ?? "");
+        // Defaults only apply before the user (or a reopened conversation)
+        // has picked a harness for this project.
+        if (
+          firstInstalled &&
+          !useChatStore.getState().projects[project.id]?.harness
+        ) {
+          setHarness({
+            tool: firstInstalled.tool,
+            model: firstInstalled.models[0] ?? "",
+          });
         }
       })
       .catch(() => {});
-  }, []);
+  }, [project.id, setHarness]);
 
   useEffect(() => {
     const path = project.repo_path?.trim();
@@ -474,111 +697,6 @@ export function ChatView({ project }: { project: Project }) {
       .then((r) => setAgents(r.agents))
       .catch(() => {});
   }, [project.repo_path]);
-
-  useEffect(() => {
-    const unsub: UnlistenFn[] = [];
-    let cancelled = false;
-    void (async () => {
-      const subs = await Promise.all([
-        listen<ChatStreamLine>("chat-stream", (ev) => {
-          const { sessionId, raw } = ev.payload;
-          const entry = turnsRef.current.get(sessionId);
-          if (!entry) return;
-          const turnId = entry.turnId;
-          let frame: ChatProtoEvent;
-          try {
-            frame = JSON.parse(raw) as ChatProtoEvent;
-          } catch {
-            return;
-          }
-          // Adopt the CLI-reported conversation id, but only move `convRef`
-          // when the user is still on the conversation that owns this session
-          // — otherwise a finishing background turn would yank the target of
-          // the user's NEXT message back to an old conversation.
-          if (frame.type === "turn_started" || frame.type === "turn_completed") {
-            if (frame.conversation_id) {
-              if (convRef.current === entry.convId) {
-                convRef.current = frame.conversation_id;
-              }
-              entry.convId = frame.conversation_id;
-            }
-            if (frame.type === "turn_completed" && entry.pendingTitle) {
-              // Auto-name the session's OWN conversation (never whatever the
-              // user happens to be viewing now).
-              const title = entry.pendingTitle;
-              entry.pendingTitle = null;
-              const path = projectPathRef.current?.trim();
-              if (path && entry.convId) {
-                void chatRename(path, entry.convId, title)
-                  .catch(() => {})
-                  .finally(() =>
-                    window.dispatchEvent(new Event("animus-chat-updated")),
-                  );
-              }
-            }
-            return;
-          }
-          if (frame.type === "metadata") {
-            // Provider usage/cost frame (may arrive cumulatively) — keep the
-            // latest non-null values on the turn.
-            setTurns((prev) =>
-              prev.map((t) =>
-                t.id === turnId
-                  ? {
-                      ...t,
-                      usage: frame.tokens ?? t.usage,
-                      cost: frame.cost_usd ?? t.cost,
-                    }
-                  : t,
-              ),
-            );
-            return;
-          }
-          setTurns((prev) =>
-            prev.map((t) =>
-              t.id === turnId ? { ...t, blocks: foldFrame(t.blocks, frame) } : t,
-            ),
-          );
-        }),
-        listen<ChatStreamEnd>("chat-stream-end", (ev) => {
-          const { sessionId, exitCode, error } = ev.payload;
-          const entry = turnsRef.current.get(sessionId);
-          if (!entry) return;
-          const turnId = entry.turnId;
-          // A user-initiated stop is not a failure: settle the turn as done
-          // (with a "stopped" marker) instead of leaving it spinning or red.
-          const wasCancelled = error === "cancelled";
-          setTurns((prev) =>
-            prev.map((t) =>
-              t.id === turnId
-                ? wasCancelled
-                  ? { ...t, status: "done", error: null, stopped: true }
-                  : {
-                      ...t,
-                      status:
-                        error || (exitCode != null && exitCode !== 0)
-                          ? "error"
-                          : "done",
-                      error,
-                    }
-                : t,
-            ),
-          );
-          setActiveSession((s) => (s === sessionId ? null : s));
-          turnsRef.current.delete(sessionId);
-        }),
-      ]);
-      if (cancelled) {
-        subs.forEach((u) => u());
-        return;
-      }
-      unsub.push(...subs);
-    })();
-    return () => {
-      cancelled = true;
-      unsub.forEach((u) => u());
-    };
-  }, []);
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -620,7 +738,7 @@ export function ChatView({ project }: { project: Project }) {
 
   // If the conversation we're pointed at is deleted from the rail, reset to a
   // fresh one instead of sending future turns at a dead id; always prune its
-  // composer draft.
+  // composer draft and turn bucket.
   useEffect(() => {
     const handler = (e: Event) => {
       const d = (e as CustomEvent).detail as
@@ -628,7 +746,16 @@ export function ChatView({ project }: { project: Project }) {
         | undefined;
       if (!d?.conversationId) return;
       composerDrafts.delete(`${d.projectId}:${d.conversationId}`);
-      if (d.projectId === project.id && convRef.current === d.conversationId) {
+      if (d.projectId !== project.id) return;
+      patchChat(project.id, (pcur) => {
+        const buckets = { ...pcur.buckets };
+        delete buckets[d.conversationId!];
+        return { buckets };
+      });
+      if (
+        useChatStore.getState().projects[project.id]?.viewing ===
+        d.conversationId
+      ) {
         newConversation();
       }
     };
@@ -651,13 +778,15 @@ export function ChatView({ project }: { project: Project }) {
     if (!path || !text || busy) return;
     const sessionId = nextSessionId();
     const turnId = `turn-${sessionId}`;
-    turnsRef.current.set(sessionId, {
+    sessions.set(sessionId, {
+      projectId: project.id,
+      repoPath: path,
       turnId,
-      convId: convRef.current,
+      convKey: viewing,
       // Auto-name a brand-new conversation from its first message; an
       // existing conversation gets no pending title so nothing can leak.
       pendingTitle:
-        convRef.current == null ? deriveConversationTitle(text) || null : null,
+        viewing === "new" ? deriveConversationTitle(text) || null : null,
     });
     const turn: ChatTurn = {
       id: turnId,
@@ -671,11 +800,16 @@ export function ChatView({ project }: { project: Project }) {
       usage: null,
       cost: null,
     };
-    setTurns((prev) => [...prev, turn]);
-    setActiveSession(sessionId);
+    patchChat(project.id, (pcur) => ({
+      buckets: {
+        ...pcur.buckets,
+        [viewing]: [...(pcur.buckets[viewing] ?? EMPTY_TURNS), turn],
+      },
+      activeSession: sessionId,
+    }));
     if (override === undefined) {
       setPrompt("");
-      composerDrafts.delete(`${project.id}:${convRef.current ?? "new"}`);
+      composerDrafts.delete(`${project.id}:${viewing}`);
     }
     try {
       await chatAgentRun({
@@ -684,31 +818,37 @@ export function ChatView({ project }: { project: Project }) {
         tool,
         model: model || undefined,
         prompt: turn.prompt,
-        conversationId: convRef.current ?? undefined,
+        conversationId: viewing === "new" ? undefined : viewing,
         timeoutSecs: 600,
         reasoningEffort: effort || undefined,
         agentId: agentId || undefined,
       });
     } catch (e) {
-      setTurns((prev) =>
-        prev.map((t) =>
-          t.id === turnId ? { ...t, status: "error", error: String(e) } : t,
-        ),
+      const entry = sessions.get(sessionId);
+      sessions.delete(sessionId);
+      patchTurn(project.id, entry?.convKey ?? viewing, turnId, (t) => ({
+        ...t,
+        status: "error",
+        error: String(e),
+      }));
+      patchChat(project.id, (pcur) =>
+        pcur.activeSession === sessionId ? { activeSession: null } : {},
       );
-      setActiveSession(null);
-      turnsRef.current.delete(sessionId);
     }
-  }, [project.repo_path, prompt, busy, tool, model, agentId, effort]);
+  }, [project.repo_path, project.id, prompt, busy, tool, model, agentId, effort, viewing]);
 
   const cancel = useCallback(async () => {
     if (!activeSession) return;
+    const sid = activeSession;
     // Pause the queue FIRST (same batch as the optimistic session clear) so
     // stopping a turn doesn't instantly auto-fire the next queued message at
     // an agent the user just halted.
-    setQueuePaused(true);
-    await chatCancel(activeSession).catch(() => {});
-    setActiveSession(null);
-  }, [activeSession]);
+    patchChat(project.id, () => ({ queuePaused: true }));
+    await chatCancel(sid).catch(() => {});
+    patchChat(project.id, (pcur) =>
+      pcur.activeSession === sid ? { activeSession: null } : {},
+    );
+  }, [activeSession, project.id]);
 
   // Esc stops the in-flight turn. No-op when nothing is running, and ignored
   // when focus is in some OTHER text field (rail rename/search) — only the
@@ -736,33 +876,38 @@ export function ChatView({ project }: { project: Project }) {
   const submit = useCallback(() => {
     const text = prompt.trim();
     if (!text) return;
-    setQueuePaused(false);
     if (busy) {
-      setQueue((q) => [...q, text]);
+      patchChat(project.id, (pcur) => ({
+        queuePaused: false,
+        queue: [...pcur.queue, text],
+      }));
       setPrompt("");
-      composerDrafts.delete(`${project.id}:${convRef.current ?? "new"}`);
+      composerDrafts.delete(`${project.id}:${viewing}`);
     } else {
+      patchChat(project.id, () => ({ queuePaused: false }));
       void send(); // send() reads + clears `prompt` itself
     }
-  }, [prompt, busy, send, project.id]);
+  }, [prompt, busy, send, project.id, viewing]);
 
   // Drain the queue: as soon as no turn is active (and the queue isn't
   // paused by a stop), fire the next queued message. send() sets
-  // activeSession synchronously, so this can't double-fire.
+  // activeSession synchronously, so this can't double-fire. The repo-path
+  // guard mirrors send()'s — dequeue only what send() will actually take.
   useEffect(() => {
-    if (!activeSession && !queuePaused && queue.length > 0) {
-      const [next, ...rest] = queue;
-      setQueue(rest);
-      void send(next);
-    }
-  }, [activeSession, queuePaused, queue, send]);
+    if (activeSession || queuePaused || queue.length === 0) return;
+    if (!project.repo_path?.trim()) return;
+    const [next, ...rest] = queue;
+    patchChat(project.id, () => ({ queue: rest }));
+    void send(next);
+  }, [activeSession, queuePaused, queue, send, project.id, project.repo_path]);
 
   function pickAgent(id: string) {
-    setAgentId(id);
-    if (!id) return;
-    const a = agents.find((x) => x.id === id);
-    if (a?.tool) setTool(a.tool);
-    if (a?.model) setModel(a.model);
+    const a = id ? agents.find((x) => x.id === id) : undefined;
+    setHarness({
+      agentId: id,
+      ...(a?.tool ? { tool: a.tool } : {}),
+      ...(a?.model ? { model: a.model } : {}),
+    });
   }
 
   const headName = agentId ? `@${agentId}` : "Animus Agent";
@@ -779,11 +924,11 @@ export function ChatView({ project }: { project: Project }) {
       agentId={agentId}
       pickAgent={pickAgent}
       tool={tool}
-      setTool={setTool}
+      setTool={(t) => setHarness({ tool: t })}
       model={model}
-      setModel={setModel}
+      setModel={(m) => setHarness({ model: m })}
       effort={effort}
-      setEffort={setEffort}
+      setEffort={(e) => setHarness({ effort: e })}
       currentProvider={currentProvider}
       autofocus={isEmpty}
       lockHarness={!isEmpty}
@@ -966,9 +1111,13 @@ export function ChatView({ project }: { project: Project }) {
                 queue={queue}
                 paused={queuePaused}
                 onRemove={(i) =>
-                  setQueue((cur) => cur.filter((_, j) => j !== i))
+                  patchChat(project.id, (pcur) => ({
+                    queue: pcur.queue.filter((_, j) => j !== i),
+                  }))
                 }
-                onResume={() => setQueuePaused(false)}
+                onResume={() =>
+                  patchChat(project.id, () => ({ queuePaused: false }))
+                }
               />
               {composer}
             </div>

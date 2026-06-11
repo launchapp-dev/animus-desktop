@@ -27,30 +27,43 @@ pub struct InstallProgress {
     pub message: String,
 }
 
-fn animus_binary_path() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME");
-    eprintln!("[daemon] HOME = {:?}", home);
-    if let Some(h) = home {
-        let candidate = PathBuf::from(&h).join(".local/bin/animus");
-        eprintln!(
-            "[daemon] checking {} -> exists={}",
-            candidate.display(),
-            candidate.exists()
-        );
+// Resolving the binary can shell out to `which`, which is too slow/blocky to
+// run on every Tauri command. Cache successful resolutions only — a miss
+// (not installed yet) re-checks each call, and the install flow invalidates
+// the cache so a fresh install is picked up immediately.
+static ANIMUS_BIN_CACHE: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+pub(crate) async fn resolve_animus_binary() -> Option<PathBuf> {
+    if let Ok(guard) = ANIMUS_BIN_CACHE.lock() {
+        if let Some(p) = guard.as_ref() {
+            if p.exists() {
+                return Some(p.clone());
+            }
+        }
+    }
+    let found = locate_animus_binary().await;
+    if let Some(p) = &found {
+        if let Ok(mut guard) = ANIMUS_BIN_CACHE.lock() {
+            *guard = Some(p.clone());
+        }
+    }
+    found
+}
+
+fn invalidate_animus_binary_cache() {
+    if let Ok(mut guard) = ANIMUS_BIN_CACHE.lock() {
+        *guard = None;
+    }
+}
+
+async fn locate_animus_binary() -> Option<PathBuf> {
+    if let Some(home) = std::env::var_os("HOME") {
+        let candidate = PathBuf::from(&home).join(".local/bin/animus");
         if candidate.exists() {
             return Some(candidate);
         }
     }
-    let via_which = which_animus();
-    eprintln!("[daemon] which animus -> {:?}", via_which);
-    via_which
-}
-
-fn which_animus() -> Option<PathBuf> {
-    let output = std::process::Command::new("which")
-        .arg("animus")
-        .output()
-        .ok()?;
+    let output = Command::new("which").arg("animus").output().await.ok()?;
     if !output.status.success() {
         return None;
     }
@@ -194,19 +207,7 @@ async fn pgrep_animus_daemon(project_root: Option<&str>) -> (bool, Option<u32>) 
 }
 
 async fn current_status_for(project_root: Option<&str>) -> DaemonStatus {
-    let bin = animus_binary_path();
-    let installed = bin.is_some();
-    if !installed {
-        return DaemonStatus {
-            installed: false,
-            running: false,
-            version: None,
-            pid: None,
-            plugins_installed: 0,
-            binary_path: None,
-        };
-    }
-    let bin_path = match bin {
+    let bin_path = match resolve_animus_binary().await {
         Some(b) => b,
         None => {
             return DaemonStatus {
@@ -267,6 +268,7 @@ pub async fn daemon_install(app: AppHandle) -> Result<DaemonStatus, String> {
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
         .spawn()
         .map_err(|e| format!("failed to spawn bash: {e}"))?;
 
@@ -302,6 +304,7 @@ pub async fn daemon_install(app: AppHandle) -> Result<DaemonStatus, String> {
         ));
     }
 
+    invalidate_animus_binary_cache();
     let status = current_status_for(None).await;
     emit_progress(&app, "done", Some(100), "Animus installed");
     Ok(status)
@@ -309,18 +312,13 @@ pub async fn daemon_install(app: AppHandle) -> Result<DaemonStatus, String> {
 
 #[tauri::command]
 pub async fn daemon_status(project_root: Option<String>) -> Result<DaemonStatus, String> {
-    let s = current_status_for(project_root.as_deref()).await;
-    eprintln!(
-        "[daemon] daemon_status(project_root={:?}) -> installed={} running={} version={:?} pid={:?} plugins={}",
-        project_root, s.installed, s.running, s.version, s.pid, s.plugins_installed
-    );
-    Ok(s)
+    Ok(current_status_for(project_root.as_deref()).await)
 }
 
 #[tauri::command]
 pub async fn daemon_start(project_root: Option<String>) -> Result<DaemonStatus, String> {
-    eprintln!("[daemon] daemon_start(project_root={:?})", project_root);
-    let bin = animus_binary_path()
+    let bin = resolve_animus_binary()
+        .await
         .ok_or_else(|| "animus binary not found; run daemon_install first".to_string())?;
     let mut cmd = Command::new(&bin);
     cmd.arg("daemon").arg("start").arg("--autonomous");
@@ -332,11 +330,6 @@ pub async fn daemon_start(project_root: Option<String>) -> Result<DaemonStatus, 
         .await
         .map_err(|e| format!("failed to run animus daemon start: {e}"))?;
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    eprintln!(
-        "[daemon] daemon_start status={} stderr={}",
-        output.status,
-        stderr.trim()
-    );
     if !output.status.success() {
         return Err(format!(
             "daemon start failed ({}): {}",
@@ -351,7 +344,8 @@ pub async fn daemon_start(project_root: Option<String>) -> Result<DaemonStatus, 
 
 #[tauri::command]
 pub async fn daemon_stop(project_root: Option<String>) -> Result<DaemonStatus, String> {
-    let bin = animus_binary_path()
+    let bin = resolve_animus_binary()
+        .await
         .ok_or_else(|| "animus binary not found".to_string())?;
     let mut cmd = Command::new(&bin);
     cmd.arg("daemon").arg("stop");

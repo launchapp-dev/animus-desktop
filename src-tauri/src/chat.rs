@@ -26,7 +26,7 @@ pub struct ChatStreamEnd {
 
 #[derive(Debug, Default)]
 pub struct ChatManager {
-    runs: Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
+    runs: Arc<Mutex<HashMap<String, (Option<u32>, JoinHandle<()>)>>>,
 }
 
 impl ChatManager {
@@ -34,6 +34,23 @@ impl ChatManager {
         Self::default()
     }
 }
+
+// Mirror of the event-bridge line cap (see event_bridge.rs): a provider that
+// emits a pathological line must not be buffered/forwarded whole.
+const CHAT_MAX_LINE_BYTES: usize = 64 * 1024;
+
+/// SIGKILL an entire unix process group (children are spawned with
+/// `process_group(0)`, so the group id is the child pid). Killing only the
+/// direct `animus` child leaves the provider grandchild (claude/codex) alive.
+#[cfg(unix)]
+pub(crate) fn kill_process_group(pid: u32) {
+    unsafe {
+        libc::kill(-(pid as i32), libc::SIGKILL);
+    }
+}
+
+#[cfg(not(unix))]
+pub(crate) fn kill_process_group(_pid: u32) {}
 
 fn animus_binary() -> PathBuf {
     if let Some(home) = dirs::home_dir() {
@@ -213,32 +230,60 @@ pub async fn chat_agent_run(
             cmd.arg("--agent").arg(agent.trim());
         }
     }
-    // Positional message arg comes last.
-    cmd.arg(&args.prompt);
+    // Positional message arg comes last, after `--` so a prompt starting
+    // with `-` can't be parsed as a flag.
+    cmd.arg("--").arg(&args.prompt);
     cmd.stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
+    // Own process group so stop/timeout can SIGKILL the provider grandchild
+    // (claude/codex), not just the direct `animus` child.
+    #[cfg(unix)]
+    cmd.process_group(0);
 
     // Hold the runs lock across spawn + insert so the task's self-removal at
     // completion can never lose the race with our insert (which would strand
     // a finished JoinHandle in the map forever).
     let mut runs_guard = manager.runs.lock().await;
-    let handle = tauri::async_runtime::spawn(async move {
-        let (exit_code, error) =
-            run_chat_child(cmd, &app_for_task, &session_id, timeout_secs).await;
-        // Remove BEFORE emitting: chat_cancel only emits its synthetic end
-        // event when it actually removed an entry, so exactly one
-        // `chat-stream-end` is delivered per session, never two.
-        runs_for_task.lock().await.remove(&session_id);
-        let _ = app_for_task.emit(
-            "chat-stream-end",
-            &ChatStreamEnd { session_id: session_id.clone(), exit_code, error },
-        );
-    });
-    if let Some(old) = runs_guard.insert(args.session_id.clone(), handle) {
+    let (pid, handle) = match cmd.spawn() {
+        Ok(child) => {
+            let pid = child.id();
+            let handle = tauri::async_runtime::spawn(async move {
+                let (exit_code, error) =
+                    run_chat_child(child, &app_for_task, &session_id, timeout_secs).await;
+                // Remove BEFORE emitting: chat_cancel only emits its synthetic end
+                // event when it actually removed an entry, so exactly one
+                // `chat-stream-end` is delivered per session, never two.
+                runs_for_task.lock().await.remove(&session_id);
+                let _ = app_for_task.emit(
+                    "chat-stream-end",
+                    &ChatStreamEnd { session_id: session_id.clone(), exit_code, error },
+                );
+            });
+            (pid, handle)
+        }
+        Err(e) => {
+            let handle = tauri::async_runtime::spawn(async move {
+                runs_for_task.lock().await.remove(&session_id);
+                let _ = app_for_task.emit(
+                    "chat-stream-end",
+                    &ChatStreamEnd {
+                        session_id: session_id.clone(),
+                        exit_code: None,
+                        error: Some(format!("spawn failed: {e}")),
+                    },
+                );
+            });
+            (None, handle)
+        }
+    };
+    if let Some((old_pid, old)) = runs_guard.insert(args.session_id.clone(), (pid, handle)) {
         // A reused session id must not leave the previous child streaming
         // under the same tag, uncancellable.
         old.abort();
+        if let Some(p) = old_pid {
+            kill_process_group(p);
+        }
     }
     Ok(())
 }
@@ -248,15 +293,11 @@ pub async fn chat_agent_run(
 /// fills the ~64KB stderr pipe buffer would otherwise deadlock the turn),
 /// and enforce the wall-clock timeout. Returns (exit_code, error).
 async fn run_chat_child(
-    mut cmd: Command,
+    mut child: tokio::process::Child,
     app: &AppHandle,
     session_id: &str,
     timeout_secs: u64,
 ) -> (Option<i32>, Option<String>) {
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => return (None, Some(format!("spawn failed: {e}"))),
-    };
     let stdout = match child.stdout.take() {
         Some(s) => s,
         None => return (None, Some("no stdout".to_string())),
@@ -281,11 +322,26 @@ async fn run_chat_child(
                 if trimmed.is_empty() {
                     continue;
                 }
+                // Same lesson as BRIDGE_MAX_LINE_BYTES: never forward a
+                // pathological line whole. Replace it with a small synthetic
+                // frame the frontend can fold safely.
+                let raw = if trimmed.len() > CHAT_MAX_LINE_BYTES {
+                    serde_json::json!({
+                        "type": "warning",
+                        "message": format!(
+                            "[chat frame truncated: {} bytes dropped by the desktop bridge]",
+                            trimmed.len()
+                        ),
+                    })
+                    .to_string()
+                } else {
+                    trimmed.to_string()
+                };
                 let _ = app.emit(
                     "chat-stream",
                     &ChatStreamLine {
                         session_id: session_id.to_string(),
-                        raw: trimmed.to_string(),
+                        raw,
                     },
                 );
             }
@@ -294,6 +350,9 @@ async fn run_chat_child(
     }
 
     if timed_out {
+        if let Some(pid) = child.id() {
+            kill_process_group(pid);
+        }
         let _ = child.start_kill();
     }
     let status = child.wait().await.ok();
@@ -301,7 +360,7 @@ async fn run_chat_child(
         Some(t) => t
             .await
             .ok()
-            .map(|s| s.trim().to_string())
+            .map(|s| crate::animus_cli::truncate_output(&s))
             .filter(|s| !s.is_empty()),
         None => None,
     };
@@ -349,11 +408,15 @@ pub async fn chat_cancel(
     manager: tauri::State<'_, ChatManager>,
     session_id: String,
 ) -> Result<(), String> {
-    if let Some(handle) = manager.runs.lock().await.remove(&session_id) {
+    if let Some((pid, handle)) = manager.runs.lock().await.remove(&session_id) {
         // Aborting kills the task that would have emitted `chat-stream-end`
         // (the child dies via kill_on_drop), so emit a synthetic terminal
-        // event — otherwise the turn spins as "running" forever.
+        // event — otherwise the turn spins as "running" forever. The group
+        // kill takes the provider grandchild down with it.
         handle.abort();
+        if let Some(p) = pid {
+            kill_process_group(p);
+        }
         let _ = app.emit(
             "chat-stream-end",
             &ChatStreamEnd {
@@ -422,6 +485,13 @@ pub struct ProjectConversation {
 pub async fn chat_list_all(
     projects: Vec<ProjectRef>,
 ) -> Result<Vec<ProjectConversation>, String> {
+    // Pure disk scan, but std::fs — keep it off the async executor.
+    tokio::task::spawn_blocking(move || chat_list_all_blocking(projects))
+        .await
+        .map_err(|e| format!("chat scan failed: {e}"))
+}
+
+fn chat_list_all_blocking(projects: Vec<ProjectRef>) -> Vec<ProjectConversation> {
     let mut out: Vec<ProjectConversation> = Vec::new();
     for p in projects {
         let repo = PathBuf::from(p.repo_path.trim());
@@ -465,7 +535,7 @@ pub async fn chat_list_all(
     }
     // newest first
     out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-    Ok(out)
+    out
 }
 
 /// Conversation ids become directory names — reject path separators and other
@@ -506,13 +576,18 @@ pub async fn chat_get(
     if !is_safe_conversation_id(&conversation_id) {
         return Err(format!("invalid conversation id: {conversation_id}"));
     }
-    let chat_dir = chat_dir_for(&repo)
-        .ok_or_else(|| "could not resolve scoped chat directory".to_string())?;
-    let conv_dir = chat_dir.join(&conversation_id);
-    let meta = read_meta(&conv_dir)
-        .ok_or_else(|| format!("conversation '{conversation_id}' not found"))?;
-    let messages = read_messages(&conv_dir.join("messages.jsonl"));
-    Ok(serde_json::json!({ "meta": meta, "messages": messages }))
+    // The transcript read can be tens of MB of sync IO — off the executor.
+    tokio::task::spawn_blocking(move || {
+        let chat_dir = chat_dir_for(&repo)
+            .ok_or_else(|| "could not resolve scoped chat directory".to_string())?;
+        let conv_dir = chat_dir.join(&conversation_id);
+        let meta = read_meta(&conv_dir)
+            .ok_or_else(|| format!("conversation '{conversation_id}' not found"))?;
+        let messages = read_messages(&conv_dir.join("messages.jsonl"));
+        Ok(serde_json::json!({ "meta": meta, "messages": messages }))
+    })
+    .await
+    .map_err(|e| format!("chat read failed: {e}"))?
 }
 
 /// Set (or clear) a conversation's `title` in its `meta.json`, preserving every
@@ -546,13 +621,17 @@ pub async fn chat_rename(
     if !is_safe_conversation_id(&conversation_id) {
         return Err(format!("invalid conversation id: {conversation_id}"));
     }
-    let chat_dir = chat_dir_for(&repo)
-        .ok_or_else(|| "could not resolve scoped chat directory".to_string())?;
-    let conv_dir = chat_dir.join(&conversation_id);
-    if !conv_dir.is_dir() {
-        return Err(format!("conversation '{conversation_id}' not found"));
-    }
-    set_meta_title(&conv_dir, Some(&title))
+    tokio::task::spawn_blocking(move || {
+        let chat_dir = chat_dir_for(&repo)
+            .ok_or_else(|| "could not resolve scoped chat directory".to_string())?;
+        let conv_dir = chat_dir.join(&conversation_id);
+        if !conv_dir.is_dir() {
+            return Err(format!("conversation '{conversation_id}' not found"));
+        }
+        set_meta_title(&conv_dir, Some(&title))
+    })
+    .await
+    .map_err(|e| format!("chat rename failed: {e}"))?
 }
 
 /// Permanently delete a conversation (removes its scoped directory).
@@ -562,14 +641,18 @@ pub async fn chat_delete(repo_path: String, conversation_id: String) -> Result<(
     if !is_safe_conversation_id(&conversation_id) {
         return Err(format!("invalid conversation id: {conversation_id}"));
     }
-    let chat_dir = chat_dir_for(&repo)
-        .ok_or_else(|| "could not resolve scoped chat directory".to_string())?;
-    let conv_dir = chat_dir.join(&conversation_id);
-    if !conv_dir.is_dir() {
-        return Err(format!("conversation '{conversation_id}' not found"));
-    }
-    std::fs::remove_dir_all(&conv_dir).map_err(|e| format!("delete failed: {e}"))?;
-    Ok(())
+    tokio::task::spawn_blocking(move || {
+        let chat_dir = chat_dir_for(&repo)
+            .ok_or_else(|| "could not resolve scoped chat directory".to_string())?;
+        let conv_dir = chat_dir.join(&conversation_id);
+        if !conv_dir.is_dir() {
+            return Err(format!("conversation '{conversation_id}' not found"));
+        }
+        std::fs::remove_dir_all(&conv_dir).map_err(|e| format!("delete failed: {e}"))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("chat delete failed: {e}"))?
 }
 
 /// List provider plugins (kind=provider) and a sensible set of known models
