@@ -42,6 +42,15 @@ pub fn run() {
             .plugin(tauri_plugin_global_shortcut::Builder::new().build());
     }
 
+    #[cfg(debug_assertions)]
+    {
+        builder = builder.plugin(
+            tauri_plugin_mcp_bridge::Builder::new()
+                .bind_address("127.0.0.1")
+                .build(),
+        );
+    }
+
     builder
         .setup(|app| {
             let app_state = tauri::async_runtime::block_on(async {
@@ -142,6 +151,8 @@ pub fn run() {
             animus_cli::animus_status_get,
             animus_cli::animus_queue_list,
             animus_cli::animus_workflow_run,
+            animus_cli::animus_daemon_config_get,
+            animus_cli::animus_daemon_config_set,
             animus_cli::animus_secret_list,
             animus_cli::animus_secret_set,
             animus_cli::animus_secret_get,

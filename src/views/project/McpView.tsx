@@ -199,8 +199,22 @@ function McpCard({
           <span className="team-member__chip" style={{ color: ttColor, borderColor: ttColor }}>
             {transportLabel(server)}
           </span>
-          <span className="team-member__chip team-member__chip--count">
-            {attachedAgents.length} agent{attachedAgents.length === 1 ? "" : "s"}
+          <span
+            className="team-member__chip team-member__chip--count"
+            style={
+              attachedAgents.length === 0
+                ? { color: "var(--yellow, #f0b429)", borderColor: "rgba(240,180,41,0.4)" }
+                : undefined
+            }
+            title={
+              attachedAgents.length === 0
+                ? "No agent uses this server yet — expand and use “Link to agents” to wire it up"
+                : attachedAgents.map((a) => `@${a.id}`).join(", ")
+            }
+          >
+            {attachedAgents.length === 0
+              ? "unused — link agents"
+              : `${attachedAgents.length} agent${attachedAgents.length === 1 ? "" : "s"}`}
           </span>
           {server.tools.length > 0 && (
             <span className="team-member__chip team-member__chip--count">

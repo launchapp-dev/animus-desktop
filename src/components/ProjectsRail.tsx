@@ -22,11 +22,12 @@ import {
 } from "../api/chat";
 import { relativeTime, conversationMatches, nextNavIndex } from "../lib/utils";
 import { ProviderLogo } from "./ProviderLogo";
+import { useConversationStreaming } from "../views/project/ChatView";
 import type { CycleStatus } from "../types/contracts";
 import {
   Plus,
   Boxes,
-  Plug2,
+  Settings2,
   FolderGit2,
   MessageSquarePlus,
   Pencil,
@@ -57,6 +58,7 @@ function ConversationRow({
   const [draft, setDraft] = useState(c.title ?? "");
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
+  const streaming = useConversationStreaming(c.projectId, c.id);
 
   const commitRename = async () => {
     setEditing(false);
@@ -126,10 +128,18 @@ function ConversationRow({
         <span className="truncate text-[12px] leading-tight text-sidebar-foreground/85">
           {c.title ?? "Untitled chat"}
         </span>
-        {c.updatedAt && (
-          <span className="ml-auto shrink-0 text-[10px] tabular-nums text-sidebar-foreground/35 group-hover/conv:opacity-0">
-            {relativeTime(c.updatedAt)}
-          </span>
+        {streaming ? (
+          <span
+            className="conv-live ml-auto shrink-0"
+            title="Streaming"
+            aria-label="Streaming"
+          />
+        ) : (
+          c.updatedAt && (
+            <span className="ml-auto shrink-0 text-[10px] tabular-nums text-sidebar-foreground/35 group-hover/conv:opacity-0">
+              {relativeTime(c.updatedAt)}
+            </span>
+          )
         )}
       </SidebarMenuButton>
       {confirming ? (
@@ -476,14 +486,21 @@ export function ProjectsRail({
                   <span>All agents</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   isActive={activeId === "plugins"}
                   onClick={() => setActive("plugins")}
-                  tooltip="Plugins"
+                  tooltip="Settings"
                 >
-                  <Plug2 />
-                  <span>Plugins</span>
+                  <Settings2 />
+                  <span>Settings</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>

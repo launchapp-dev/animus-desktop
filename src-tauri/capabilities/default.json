@@ -13,6 +13,7 @@
     "core:window:allow-set-size",
     "core:window:allow-set-always-on-top",
     "core:window:allow-set-skip-taskbar",
+    "core:window:allow-set-theme",
     "core:webview:default",
     "core:event:default",
     "core:app:default",
@@ -29,6 +30,7 @@
     "dialog:default",
     "dialog:allow-open",
     "autostart:default",
-    "global-shortcut:default"
+    "global-shortcut:default",
+    "mcp-bridge:default"
   ]
 }

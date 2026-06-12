@@ -32,6 +32,27 @@ import { Transcript } from "./journal/Transcript";
 
 type RunStatusFilter = "all" | "completed" | "failed";
 
+const RUNS_PAGE = 80;
+
+/** Bucket a run's start time into a human day label for list dividers. */
+function dayLabel(now: number, startedMs: number | null): string {
+  if (!startedMs) return "Undated";
+  const d = new Date(startedMs);
+  const today = new Date(now);
+  const startOfDay = (x: Date) =>
+    new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diffDays = Math.round(
+    (startOfDay(today) - startOfDay(d)) / 86_400_000,
+  );
+  if (diffDays <= 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(d.getFullYear() !== today.getFullYear() ? { year: "numeric" } : {}),
+  });
+}
+
 /** Resolve which agents touched a run from its phases + the phase→agent map. */
 function runAgents(
   run: WorkflowRunSummary,
@@ -85,6 +106,14 @@ function RunListItem({
           )}
           <span className="runitem__sep">·</span>
           <span>{run.phases.length}ph</span>
+          {run.subjectId && (
+            <>
+              <span className="runitem__sep">·</span>
+              <span className="runitem__subject" title={run.subjectId}>
+                {run.subjectId}
+              </span>
+            </>
+          )}
           {run.errorCount > 0 && (
             <>
               <span className="runitem__sep">·</span>
@@ -221,6 +250,7 @@ export function JournalView({ project }: { project: Project }) {
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<NormalizedEvent[]>([]);
   const [loadingTranscript, setLoadingTranscript] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(RUNS_PAGE);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 15_000);
@@ -296,6 +326,15 @@ export function JournalView({ project }: { project: Project }) {
     }
     return arr;
   }, [runs, statusFilter, agentFilter, search, agentByPhase]);
+
+  // Keep the DOM bounded: render runs in pages, reset when filters change.
+  useEffect(() => {
+    setVisibleCount(RUNS_PAGE);
+  }, [statusFilter, agentFilter, search]);
+  const visibleRuns = useMemo(
+    () => filteredRuns.slice(0, visibleCount),
+    [filteredRuns, visibleCount],
+  );
 
   const selectedRun = useMemo(() => {
     if (selectedUuid) {
@@ -390,7 +429,6 @@ export function JournalView({ project }: { project: Project }) {
         </div>
         <div className="journal-master__filters">
           <select
-            className="plugins-pane__search"
             value={agentFilter}
             onChange={(e) => setAgentFilter(e.target.value)}
           >
@@ -412,17 +450,37 @@ export function JournalView({ project }: { project: Project }) {
               {loadingRuns ? "Loading runs…" : "No runs yet."}
             </li>
           ) : (
-            filteredRuns.map((run) => (
-              <li key={run.wfUuid}>
-                <RunListItem
-                  run={run}
-                  agents={runAgents(run, agentByPhase)}
-                  active={selectedRun?.wfUuid === run.wfUuid}
-                  now={now}
-                  onClick={() => setSelectedUuid(run.wfUuid)}
-                />
-              </li>
-            ))
+            visibleRuns.map((run, i) => {
+              const label = dayLabel(now, run.startedMs);
+              const prevLabel =
+                i > 0 ? dayLabel(now, visibleRuns[i - 1]!.startedMs) : null;
+              return (
+                <li key={run.wfUuid}>
+                  {label !== prevLabel && (
+                    <div className="journal-master__day">{label}</div>
+                  )}
+                  <RunListItem
+                    run={run}
+                    agents={runAgents(run, agentByPhase)}
+                    active={selectedRun?.wfUuid === run.wfUuid}
+                    now={now}
+                    onClick={() => setSelectedUuid(run.wfUuid)}
+                  />
+                </li>
+              );
+            })
+          )}
+          {filteredRuns.length > visibleCount && (
+            <li>
+              <button
+                type="button"
+                className="journal-master__more"
+                onClick={() => setVisibleCount((c) => c + RUNS_PAGE)}
+              >
+                Show {Math.min(RUNS_PAGE, filteredRuns.length - visibleCount)}{" "}
+                more of {filteredRuns.length - visibleCount}
+              </button>
+            </li>
           )}
         </ul>
       </aside>

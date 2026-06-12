@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
-import { Sparkles, Paperclip, ArrowDown, Brain } from "lucide-react";
+import { Paperclip, ArrowDown, Brain } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useHotkeys } from "react-hotkeys-hook";
 import { AgentFace, type AgentState } from "../../components/AgentFace";
@@ -87,9 +87,12 @@ interface ProjectChat {
   /** Turn lists per conversation key — frames keep landing in the owning
    *  bucket even when the user is viewing a different conversation. */
   buckets: Record<string, ChatTurn[]>;
-  queue: string[];
-  queuePaused: boolean;
-  activeSession: string | null;
+  /** Type-ahead queues per conversation key — each conversation streams,
+   *  queues, and pauses independently, so several chats can run at once. */
+  queues: Record<string, string[]>;
+  paused: Record<string, boolean>;
+  /** In-flight sessionId per conversation key. */
+  active: Record<string, string>;
   harness: ChatHarness | null;
 }
 
@@ -100,15 +103,27 @@ const useChatStore = create<{ projects: Record<string, ProjectChat> }>(() => ({
   projects: {},
 }));
 
+/** True while `conversationId` has a turn streaming — lets the rail show
+ *  activity on chats running in the background. */
+export function useConversationStreaming(
+  projectId: string,
+  conversationId: string,
+): boolean {
+  return useChatStore(
+    (s) => !!s.projects[projectId]?.active[conversationId],
+  );
+}
+
 const EMPTY_PROJECT_CHAT: ProjectChat = {
   viewing: "new",
   buckets: {},
-  queue: [],
-  queuePaused: false,
-  activeSession: null,
+  queues: {},
+  paused: {},
+  active: {},
   harness: null,
 };
 const EMPTY_TURNS: ChatTurn[] = [];
+const EMPTY_QUEUE: string[] = [];
 
 function patchChat(
   projectId: string,
@@ -174,8 +189,26 @@ function handleStreamLine({ sessionId, raw }: ChatStreamLine) {
           delete buckets[oldKey];
           buckets[newKey] = moved;
         }
+        const queues = { ...pc.queues };
+        if (queues[oldKey]) {
+          queues[newKey] = queues[oldKey]!;
+          delete queues[oldKey];
+        }
+        const paused = { ...pc.paused };
+        if (paused[oldKey] !== undefined) {
+          paused[newKey] = paused[oldKey]!;
+          delete paused[oldKey];
+        }
+        const active = { ...pc.active };
+        if (active[oldKey]) {
+          active[newKey] = active[oldKey]!;
+          delete active[oldKey];
+        }
         return {
           buckets,
+          queues,
+          paused,
+          active,
           viewing: pc.viewing === oldKey ? newKey : pc.viewing,
         };
       });
@@ -226,9 +259,12 @@ function handleStreamEnd({ sessionId, exitCode, error }: ChatStreamEnd) {
           error,
         },
   );
-  patchChat(entry.projectId, (pc) =>
-    pc.activeSession === sessionId ? { activeSession: null } : {},
-  );
+  patchChat(entry.projectId, (pc) => {
+    if (pc.active[entry.convKey] !== sessionId) return {};
+    const active = { ...pc.active };
+    delete active[entry.convKey];
+    return { active };
+  });
   window.dispatchEvent(new Event("animus-chat-updated"));
 }
 
@@ -263,9 +299,7 @@ function ChatAvatar({
       className="cx-master"
       style={{ width: size, height: size }}
       aria-label="Animus Agent"
-    >
-      <Sparkles size={Math.round(size * 0.5)} strokeWidth={2.2} />
-    </span>
+    />
   );
 }
 
@@ -457,14 +491,6 @@ function Composer({
 
         <span className="cx-toolbar__spacer" />
 
-        <span className="cx-hint">
-          {busy
-            ? "Esc stops"
-            : prompt.trim()
-              ? "↵ send · ⇧↵ newline"
-              : "↵ send"}
-        </span>
-
         {busy ? (
           <>
             {prompt.trim() && (
@@ -481,7 +507,7 @@ function Composer({
               type="button"
               className="cx-composer__btn cx-composer__btn--stop"
               onClick={onStop}
-              title="Stop"
+              title="Stop (Esc)"
             >
               ■
             </button>
@@ -492,7 +518,7 @@ function Composer({
             className="cx-composer__btn"
             onClick={onSend}
             disabled={!prompt.trim()}
-            title="Send (Enter)"
+            title="Send (↵) — ⇧↵ for newline"
           >
             ↑
           </button>
@@ -506,8 +532,11 @@ export function ChatView({ project }: { project: Project }) {
   const [providers, setProviders] = useState<ProviderOption[]>([]);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const pc = useChatStore((s) => s.projects[project.id]) ?? EMPTY_PROJECT_CHAT;
-  const { viewing, queue, queuePaused, activeSession } = pc;
+  const { viewing } = pc;
   const turns = pc.buckets[viewing] ?? EMPTY_TURNS;
+  const queue = pc.queues[viewing] ?? EMPTY_QUEUE;
+  const queuePaused = pc.paused[viewing] ?? false;
+  const activeSession = pc.active[viewing] ?? null;
   const tool = pc.harness?.tool ?? "claude";
   const model = pc.harness?.model ?? "";
   const agentId = pc.harness?.agentId ?? "";
@@ -624,7 +653,6 @@ export function ChatView({ project }: { project: Project }) {
           return {
             buckets: { ...pcur.buckets, [id]: [...hist, ...live] },
             viewing: id,
-            queue: [],
           };
         });
         if (t.meta.tool || t.meta.model) {
@@ -644,7 +672,6 @@ export function ChatView({ project }: { project: Project }) {
     openSeqRef.current += 1;
     patchChat(project.id, (pcur) => ({
       viewing: "new",
-      queue: [],
       buckets: {
         ...pcur.buckets,
         new: (pcur.buckets["new"] ?? EMPTY_TURNS).filter(
@@ -726,16 +753,6 @@ export function ChatView({ project }: { project: Project }) {
     [newConversation],
   );
 
-  // When a turn finishes (active session clears), tell the left rail to
-  // re-aggregate so a brand-new conversation appears / counts update.
-  // (Auto-titling is handled per-session in the stream handler so it can
-  // never rename a conversation the session doesn't own.)
-  useEffect(() => {
-    if (!activeSession) {
-      window.dispatchEvent(new Event("animus-chat-updated"));
-    }
-  }, [activeSession]);
-
   // If the conversation we're pointed at is deleted from the rail, reset to a
   // fresh one instead of sending future turns at a dead id; always prune its
   // composer draft and turn bucket.
@@ -750,7 +767,11 @@ export function ChatView({ project }: { project: Project }) {
       patchChat(project.id, (pcur) => {
         const buckets = { ...pcur.buckets };
         delete buckets[d.conversationId!];
-        return { buckets };
+        const queues = { ...pcur.queues };
+        delete queues[d.conversationId!];
+        const paused = { ...pcur.paused };
+        delete paused[d.conversationId!];
+        return { buckets, queues, paused };
       });
       if (
         useChatStore.getState().projects[project.id]?.viewing ===
@@ -772,21 +793,24 @@ export function ChatView({ project }: { project: Project }) {
   const busy = !!activeSession;
   const isEmpty = turns.length === 0;
 
-  const send = useCallback(async (override?: string) => {
+  const send = useCallback(async (override?: string, convOverride?: string) => {
     const path = project.repo_path?.trim();
     const text = (override ?? prompt).trim();
-    if (!path || !text || busy) return;
+    const conv = convOverride ?? viewing;
+    const alreadyActive =
+      useChatStore.getState().projects[project.id]?.active[conv];
+    if (!path || !text || alreadyActive) return;
     const sessionId = nextSessionId();
     const turnId = `turn-${sessionId}`;
     sessions.set(sessionId, {
       projectId: project.id,
       repoPath: path,
       turnId,
-      convKey: viewing,
+      convKey: conv,
       // Auto-name a brand-new conversation from its first message; an
       // existing conversation gets no pending title so nothing can leak.
       pendingTitle:
-        viewing === "new" ? deriveConversationTitle(text) || null : null,
+        conv === "new" ? deriveConversationTitle(text) || null : null,
     });
     const turn: ChatTurn = {
       id: turnId,
@@ -803,13 +827,13 @@ export function ChatView({ project }: { project: Project }) {
     patchChat(project.id, (pcur) => ({
       buckets: {
         ...pcur.buckets,
-        [viewing]: [...(pcur.buckets[viewing] ?? EMPTY_TURNS), turn],
+        [conv]: [...(pcur.buckets[conv] ?? EMPTY_TURNS), turn],
       },
-      activeSession: sessionId,
+      active: { ...pcur.active, [conv]: sessionId },
     }));
     if (override === undefined) {
       setPrompt("");
-      composerDrafts.delete(`${project.id}:${viewing}`);
+      composerDrafts.delete(`${project.id}:${conv}`);
     }
     try {
       await chatAgentRun({
@@ -818,7 +842,7 @@ export function ChatView({ project }: { project: Project }) {
         tool,
         model: model || undefined,
         prompt: turn.prompt,
-        conversationId: viewing === "new" ? undefined : viewing,
+        conversationId: conv === "new" ? undefined : conv,
         timeoutSecs: 600,
         reasoningEffort: effort || undefined,
         agentId: agentId || undefined,
@@ -826,29 +850,39 @@ export function ChatView({ project }: { project: Project }) {
     } catch (e) {
       const entry = sessions.get(sessionId);
       sessions.delete(sessionId);
-      patchTurn(project.id, entry?.convKey ?? viewing, turnId, (t) => ({
+      const failedConv = entry?.convKey ?? conv;
+      patchTurn(project.id, failedConv, turnId, (t) => ({
         ...t,
         status: "error",
         error: String(e),
       }));
-      patchChat(project.id, (pcur) =>
-        pcur.activeSession === sessionId ? { activeSession: null } : {},
-      );
+      patchChat(project.id, (pcur) => {
+        if (pcur.active[failedConv] !== sessionId) return {};
+        const active = { ...pcur.active };
+        delete active[failedConv];
+        return { active };
+      });
     }
-  }, [project.repo_path, project.id, prompt, busy, tool, model, agentId, effort, viewing]);
+  }, [project.repo_path, project.id, prompt, tool, model, agentId, effort, viewing]);
 
   const cancel = useCallback(async () => {
     if (!activeSession) return;
     const sid = activeSession;
-    // Pause the queue FIRST (same batch as the optimistic session clear) so
-    // stopping a turn doesn't instantly auto-fire the next queued message at
-    // an agent the user just halted.
-    patchChat(project.id, () => ({ queuePaused: true }));
+    const conv = viewing;
+    // Pause this conversation's queue FIRST so stopping a turn doesn't
+    // instantly auto-fire the next queued message at an agent the user
+    // just halted.
+    patchChat(project.id, (pcur) => ({
+      paused: { ...pcur.paused, [conv]: true },
+    }));
     await chatCancel(sid).catch(() => {});
-    patchChat(project.id, (pcur) =>
-      pcur.activeSession === sid ? { activeSession: null } : {},
-    );
-  }, [activeSession, project.id]);
+    patchChat(project.id, (pcur) => {
+      if (pcur.active[conv] !== sid) return {};
+      const active = { ...pcur.active };
+      delete active[conv];
+      return { active };
+    });
+  }, [activeSession, project.id, viewing]);
 
   // Esc stops the in-flight turn. No-op when nothing is running, and ignored
   // when focus is in some OTHER text field (rail rename/search) — only the
@@ -871,35 +905,46 @@ export function ChatView({ project }: { project: Project }) {
     [activeSession, cancel],
   );
 
-  // Composer submit: send now when the agent is free, otherwise queue the
-  // message to auto-send the moment the current turn finishes (type-ahead).
+  // Composer submit: send now when this conversation is free, otherwise queue
+  // the message to auto-send when its current turn finishes (type-ahead).
+  // While the queue is paused (after a stop), submits keep stacking up without
+  // un-pausing — the user resumes explicitly when ready.
   const submit = useCallback(() => {
     const text = prompt.trim();
     if (!text) return;
-    if (busy) {
+    if (busy || queue.length > 0) {
       patchChat(project.id, (pcur) => ({
-        queuePaused: false,
-        queue: [...pcur.queue, text],
+        queues: {
+          ...pcur.queues,
+          [viewing]: [...(pcur.queues[viewing] ?? EMPTY_QUEUE), text],
+        },
       }));
       setPrompt("");
       composerDrafts.delete(`${project.id}:${viewing}`);
     } else {
-      patchChat(project.id, () => ({ queuePaused: false }));
+      patchChat(project.id, (pcur) => ({
+        paused: { ...pcur.paused, [viewing]: false },
+      }));
       void send(); // send() reads + clears `prompt` itself
     }
-  }, [prompt, busy, send, project.id, viewing]);
+  }, [prompt, busy, queue.length, send, project.id, viewing]);
 
-  // Drain the queue: as soon as no turn is active (and the queue isn't
-  // paused by a stop), fire the next queued message. send() sets
-  // activeSession synchronously, so this can't double-fire. The repo-path
-  // guard mirrors send()'s — dequeue only what send() will actually take.
+  // Drain the queues: every conversation whose turn finished (and whose queue
+  // isn't paused by a stop) fires its next queued message — including
+  // conversations streaming in the background. send() marks the conversation
+  // active synchronously, so this can't double-fire. The repo-path guard
+  // mirrors send()'s — dequeue only what send() will actually take.
   useEffect(() => {
-    if (activeSession || queuePaused || queue.length === 0) return;
     if (!project.repo_path?.trim()) return;
-    const [next, ...rest] = queue;
-    patchChat(project.id, () => ({ queue: rest }));
-    void send(next);
-  }, [activeSession, queuePaused, queue, send, project.id, project.repo_path]);
+    for (const [conv, q] of Object.entries(pc.queues)) {
+      if (q.length === 0 || pc.paused[conv] || pc.active[conv]) continue;
+      const [next, ...rest] = q;
+      patchChat(project.id, (pcur) => ({
+        queues: { ...pcur.queues, [conv]: rest },
+      }));
+      void send(next, conv);
+    }
+  }, [pc.queues, pc.paused, pc.active, send, project.id, project.repo_path]);
 
   function pickAgent(id: string) {
     const a = id ? agents.find((x) => x.id === id) : undefined;
@@ -1112,11 +1157,18 @@ export function ChatView({ project }: { project: Project }) {
                 paused={queuePaused}
                 onRemove={(i) =>
                   patchChat(project.id, (pcur) => ({
-                    queue: pcur.queue.filter((_, j) => j !== i),
+                    queues: {
+                      ...pcur.queues,
+                      [viewing]: (pcur.queues[viewing] ?? EMPTY_QUEUE).filter(
+                        (_, j) => j !== i,
+                      ),
+                    },
                   }))
                 }
                 onResume={() =>
-                  patchChat(project.id, () => ({ queuePaused: false }))
+                  patchChat(project.id, (pcur) => ({
+                    paused: { ...pcur.paused, [viewing]: false },
+                  }))
                 }
               />
               {composer}

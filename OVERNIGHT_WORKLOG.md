@@ -2,19 +2,39 @@
 
 **Goal:** By morning, make the desktop app (`/Users/samishukri/launchapp-org/animus-desktop`)
 and animus (`/Users/samishukri/ao-cli`) meaningfully more powerful and robust.
-Autonomous loop fires every 30 min. Each fire: pick the highest-value item, implement,
-**test**, log progress here, leave changes uncommitted.
+Autonomous loop fires every 30 min. Each fire: **pull the next item from Animus**
+(`animus subject next --kind task --project-root .`), mark it `in_progress`, implement,
+**test**, commit, mark it `done`, then append a progress entry below.
+
+## Backlog source (dogfood: the app's own Subjects store)
+The backlog now lives in Animus subjects (`.animus/subjects/tasks.db`), NOT in the markdown
+list below — the desktop app's own **Subjects** view is the live dashboard for its own
+development. Each fire:
+1. `animus subject next --kind task --project-root . --no-cache --json` → the item to work.
+   If it returns nothing, pick a fresh high-value idea, `animus subject create` it, then work it.
+2. `animus subject status --kind task --id <id> --status in_progress --project-root .`
+3. Implement + test (protocol below). On green: commit.
+4. `animus subject status --kind task --id <id> --status done --project-root .`
+5. Append a one-line progress entry to the log at the bottom of this file (timestamp, id, result).
+The `### P0…P5` lists below are a FROZEN historical record of completed work — do not pick from them.
 
 ## Rules
 - **ao-cli (animus CLI): ALWAYS work in a dedicated git worktree off clean main, test there, commit
   on the branch, then `git merge --ff-only` to main + remove worktree. NEVER edit the shared main
-  checkout directly — it's raced by many concurrent agents (Sami directive 2026-06-09).** Desktop
-  edits stay uncommitted as before.
-- Do NOT commit or push DESKTOP changes (user hasn't asked). Leave clean, tested, uncommitted diffs.
+  checkout directly — it's raced by many concurrent agents (Sami directive 2026-06-09).**
+- **Install+verify gate (ao-cli): if a change touches a CLI surface the desktop depends on, after
+  the ff-merge run `cargo install --path crates/orchestrator-cli --bin animus --root ~/.local --force`
+  and a live one-line assertion that the new surface exists (e.g. `animus <new-cmd> --help` or a
+  `--json` smoke). A change is not `done` until it is LIVE — coding it is not enough.** (This is the
+  fix for the tool-call-persistence regression that sat "DONE" in source for ~9h but was never installed.)
+- **Desktop: one focused commit per subject** on `main` (`git commit`, no push unless asked). The old
+  "leave uncommitted" rule is retired — uncommitted diffs were silently wiped by a concurrent agent's
+  `reset`. Small, tested, single-item commits are revertible and race-safe.
 - Do NOT add co-author/author lines anywhere.
 - Keep ao-cli Rust-only. No new desktop deps unless justified.
-- Test every change before marking done. Never leave the tree broken.
-- If the running `tauri dev` (pid tracked) crashed, restart it: `cd <desktop> && pnpm tauri dev` (background).
+- Test every change before marking the subject `done`. Never leave the tree broken.
+- If the running `tauri dev` (pid tracked) crashed, restart it: `cd <desktop> && pnpm tauri dev` (background),
+  and after any change confirm the app is healthy (task output log shows 0 new panics) before `done`.
 - Prefer editing existing files; create files only when necessary (tests, this log).
 - Keep changes small and independently shippable so a broken idea is easy to revert.
 
@@ -32,7 +52,10 @@ Runtime smoke:
 - Validate CLI shapes the app depends on, e.g. `animus chat list --json --project-root <p>`
   should stay fast (<1s) and small RAM (the 12GB metrics bug is fixed; watch for regressions).
 
-## Backlog (prioritized — keep ordered, append findings)
+## Backlog — FROZEN HISTORY (completed P0–P5; do not pick from here)
+> The live backlog moved to Animus subjects (`animus subject list --kind task`). The seeded
+> open items (stream-error reconnect, queue component test, chat export usage footer) are now
+> subjects TASK-002/004/006. The lists below are kept only as a record of what was shipped.
 
 ### P0
 1. [DONE] [animus] Persist tool calls + results per chat turn so reloaded conversations show them.

@@ -4,6 +4,7 @@ import {
   useProjectEvents,
 } from "../../state/projectEvents";
 import { localWorkflowsRead } from "../../api/workflow_yaml";
+import { daemonStatus } from "../../api/_invoke";
 import type { Project } from "../../types/contracts";
 import {
   ALL_CATS,
@@ -30,8 +31,31 @@ export function StreamView({ project }: { project: Project }) {
   const [filter, setFilter] = useState<FilterKey>("all");
   const [paused, setPaused] = useState(false);
   const [frozen, setFrozen] = useState<NormalizedEvent[] | null>(null);
+  const [daemonRunning, setDaemonRunning] = useState<boolean | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // The stream tails the event log whether or not the daemon is running, so
+  // "LIVE" alone can read as "daemon running" when it isn't. Poll the real
+  // daemon state and say so explicitly.
+  useEffect(() => {
+    const path = project.repo_path?.trim();
+    if (!path) return;
+    let cancelled = false;
+    const check = () => {
+      daemonStatus(path)
+        .then((st) => {
+          if (!cancelled) setDaemonRunning(st.running);
+        })
+        .catch(() => {});
+    };
+    check();
+    const t = setInterval(check, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [project.repo_path]);
 
   useEffect(() => {
     const path = project.repo_path?.trim();
@@ -65,7 +89,18 @@ export function StreamView({ project }: { project: Project }) {
     });
     const dedup = dedupEvents(out);
     dedup.sort((a, b) => a.ts - b.ts); // oldest first for stream
-    return dedup;
+    // Drop consecutive events with identical content (same cat/msg/body but
+    // different timestamps) — re-emitted reports otherwise render twice.
+    return dedup.filter((e, i) => {
+      if (i === 0) return true;
+      const p = dedup[i - 1]!;
+      return !(
+        e.cat === p.cat &&
+        e.msg === p.msg &&
+        e.content === p.content &&
+        e.agent === p.agent
+      );
+    });
   }, [bucket.cycles, bucket.agentByPhase]);
 
   const events = paused && frozen ? frozen : liveEvents;
@@ -102,6 +137,14 @@ export function StreamView({ project }: { project: Project }) {
           <span className="stream-pane__count">
             {filtered.length} event{filtered.length === 1 ? "" : "s"}
           </span>
+          {daemonRunning === false && (
+            <span
+              className="stream-pane__daemon-off"
+              title="The event stream stays connected even while the daemon is stopped; activity here comes from CLI or agent runs."
+            >
+              daemon stopped
+            </span>
+          )}
         </div>
         <nav className="journal-filters">
           {FILTERS.map((f) => (

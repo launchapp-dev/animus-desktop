@@ -151,6 +151,53 @@ pub async fn animus_workflow_run(
 }
 
 #[tauri::command]
+pub async fn animus_daemon_config_get(path: String) -> Result<AnimusCliResult, String> {
+    run_animus_json(&path, &["daemon", "config"]).await
+}
+
+#[tauri::command]
+pub async fn animus_daemon_config_set(
+    path: String,
+    pool_size: Option<u32>,
+    interval_secs: Option<u32>,
+    max_tasks_per_tick: Option<u32>,
+    auto_run_ready: Option<bool>,
+    auto_pr: Option<bool>,
+    auto_merge: Option<bool>,
+) -> Result<AnimusCliResult, String> {
+    let mut args: Vec<String> = vec!["daemon".into(), "config".into()];
+    if let Some(v) = pool_size {
+        args.push("--pool-size".into());
+        args.push(v.to_string());
+    }
+    if let Some(v) = interval_secs {
+        args.push("--interval-secs".into());
+        args.push(v.to_string());
+    }
+    if let Some(v) = max_tasks_per_tick {
+        args.push("--max-tasks-per-tick".into());
+        args.push(v.to_string());
+    }
+    if let Some(v) = auto_run_ready {
+        args.push("--auto-run-ready".into());
+        args.push(v.to_string());
+    }
+    if let Some(v) = auto_pr {
+        args.push("--auto-pr".into());
+        args.push(v.to_string());
+    }
+    if let Some(v) = auto_merge {
+        args.push("--auto-merge".into());
+        args.push(v.to_string());
+    }
+    if args.len() == 2 {
+        return Err("no config changes provided".to_string());
+    }
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    run_animus_json(&path, &refs).await
+}
+
+#[tauri::command]
 pub async fn animus_secret_list(path: String) -> Result<AnimusCliResult, String> {
     run_animus_json(&path, &["secret", "list"]).await
 }

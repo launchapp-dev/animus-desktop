@@ -15,7 +15,7 @@ export function StatusBar() {
     : activeId === "all-agents"
       ? "all agents"
       : activeId === "plugins"
-        ? "plugins"
+        ? "settings"
         : "no project";
 
   return (
@@ -26,7 +26,11 @@ export function StatusBar() {
             daemon?.installed ? "ok" : "off"
           }`}
         />
-        <span>{daemon?.installed ? daemon.version ?? "animus" : "no animus"}</span>
+        <span>
+          {daemon?.installed
+            ? `animus ${daemon.version ?? ""}`.trim()
+            : "animus not installed"}
+        </span>
         <span style={{ color: "var(--text-faint)" }}>·</span>
         <span>{daemon?.plugins_installed ?? 0} plugins</span>
       </span>
@@ -35,11 +39,11 @@ export function StatusBar() {
         <span
           className={`status-dot status-dot--${auth?.logged_in ? "ok" : "off"}`}
         />
-        <span>{auth?.logged_in ? `@${auth.login}` : "no github"}</span>
+        <span>{auth?.logged_in ? `@${auth.login}` : "github not connected"}</span>
       </span>
       <span className="statusbar__separator" />
       <span className="statusbar__group">
-        <span>serving: {activeLabel}</span>
+        <span>{activeLabel}</span>
       </span>
       <span className="statusbar__hint">⌘K  ·  ⌘J right pane</span>
     </footer>

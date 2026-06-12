@@ -4,7 +4,7 @@ import { useProjectsStore } from "../state/projects";
 import { useActiveProject, type BridgeMode } from "../state/activeProject";
 import { useDaemonStore } from "../state/daemon";
 import { ProjectList } from "../views/ProjectList";
-import { Settings } from "../views/Settings";
+import { DaemonView, Settings } from "../views/Settings";
 import { WorkflowsView } from "../views/project/WorkflowsView";
 import { VisualizeView } from "../views/project/VisualizeView";
 import { PluginsView } from "../views/project/PluginsView";
@@ -24,18 +24,25 @@ import {
   bridgeDetachProject,
 } from "../api/event_bridge";
 
-const MODE_TABS: { key: BridgeMode; label: string }[] = [
-  { key: "chat", label: "Chat" },
-  { key: "journal", label: "Journal" },
-  { key: "stream", label: "Stream" },
-  { key: "workflows", label: "Workflows" },
-  { key: "agents", label: "Team" },
-  { key: "mcp", label: "MCP" },
-  { key: "files", label: "Files" },
-  { key: "subjects", label: "Subjects" },
-  { key: "visualize", label: "Visualize" },
-  { key: "secrets", label: "Secrets" },
-  { key: "plugins", label: "Plugins" },
+const MODE_TAB_GROUPS: { key: BridgeMode; label: string }[][] = [
+  [
+    { key: "chat", label: "Chat" },
+    { key: "journal", label: "Journal" },
+    { key: "stream", label: "Stream" },
+    { key: "workflows", label: "Workflows" },
+    { key: "agents", label: "Team" },
+  ],
+  [
+    { key: "subjects", label: "Subjects" },
+    { key: "files", label: "Files" },
+    { key: "visualize", label: "Visualize" },
+  ],
+  [
+    { key: "daemon", label: "Daemon" },
+    { key: "mcp", label: "MCP" },
+    { key: "secrets", label: "Secrets" },
+    { key: "plugins", label: "Plugins" },
+  ],
 ];
 
 function BridgeFrame({
@@ -198,6 +205,8 @@ function ProjectModeContent({
       return <SecretsView project={project} />;
     case "plugins":
       return <PluginsView />;
+    case "daemon":
+      return <DaemonView project={project} />;
   }
 }
 
@@ -241,17 +250,17 @@ export function Bridge({ onAddProject }: { onAddProject: () => void }) {
   if (activeId === "all-agents") {
     return (
       <BridgeFrame title="All agents">
-        <p style={{ color: "var(--text-muted)", fontSize: 12 }}>
-          Cross-project roster. Group by harness, project, or model.
-          (Coming next round — wiring agents_list_all)
-        </p>
+        <div className="journal-empty">
+          Every agent across your projects will appear here. For now, pick a
+          project and open its Team tab.
+        </div>
       </BridgeFrame>
     );
   }
 
   if (activeId === "plugins") {
     return (
-      <BridgeFrame title="Plugins">
+      <BridgeFrame title="Settings">
         <Settings />
       </BridgeFrame>
     );
@@ -269,23 +278,28 @@ export function Bridge({ onAddProject }: { onAddProject: () => void }) {
             className="bridge__title-meta"
             style={{ color: "var(--blue)" }}
           >
-            ●Running
+            ● Running
           </span>
         ) : null
       }
       tabs={
         <nav className="bridge__tabs" aria-label="Project modes">
-          {MODE_TABS.map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              className={`bridge__tab ${
-                mode === tab.key ? "bridge__tab--active" : ""
-              }`}
-              onClick={() => setMode(tab.key)}
-            >
-              {tab.label}
-            </button>
+          {MODE_TAB_GROUPS.map((group, gi) => (
+            <div className="bridge__tab-group" key={group[0]!.key}>
+              {gi > 0 && <span className="bridge__tabs-sep" aria-hidden />}
+              {group.map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  className={`bridge__tab ${
+                    mode === tab.key ? "bridge__tab--active" : ""
+                  }`}
+                  onClick={() => setMode(tab.key)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
       }

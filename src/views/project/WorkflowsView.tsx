@@ -286,6 +286,15 @@ function WorkflowCard({
 }) {
   const triggeredBy = schedules.length + triggers.length;
 
+  // Two-step Run: first click arms, second click fires. Auto-disarms so a
+  // stray click can't enqueue paid agent work.
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 3000);
+    return () => clearTimeout(t);
+  }, [armed]);
+
   return (
     <article className={`workflow-row ${expanded ? "workflow-row--expanded" : ""}`}>
       <header className="workflow-row__head">
@@ -331,12 +340,23 @@ function WorkflowCard({
         </div>
         <button
           type="button"
-          className="workflow-row__run"
-          onClick={() => onRun(wf.id)}
+          className={`workflow-row__run ${armed ? "workflow-row__run--armed" : ""}`}
+          onClick={() => {
+            if (armed) {
+              setArmed(false);
+              onRun(wf.id);
+            } else {
+              setArmed(true);
+            }
+          }}
           disabled={running}
-          title="Enqueue this workflow on the project daemon"
+          title={
+            armed
+              ? "Click again to enqueue this workflow"
+              : "Enqueue this workflow on the project daemon"
+          }
         >
-          {running ? "Queuing…" : "Run"}
+          {running ? "Queuing…" : armed ? "Run? ✓" : "Run"}
         </button>
       </header>
 

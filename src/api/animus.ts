@@ -107,6 +107,48 @@ export interface AnimusStatus {
   ci?: { provider: string; available: boolean; error?: string };
 }
 
+// Per-project daemon automation config (animus daemon config --json).
+export interface DaemonConfigData {
+  config_path: string;
+  pool_size: number;
+  interval_secs: number;
+  max_tasks_per_tick: number | null;
+  auto_run_ready: boolean;
+  auto_pr_enabled: boolean;
+  auto_merge_enabled: boolean;
+  auto_commit_before_merge: boolean;
+  auto_prune_worktrees_after_merge: boolean;
+  stale_threshold_hours: number | null;
+  phase_timeout_secs: number | null;
+  idle_timeout_secs: number | null;
+  updated: boolean;
+}
+
+export interface DaemonConfigUpdate {
+  poolSize?: number;
+  intervalSecs?: number;
+  maxTasksPerTick?: number;
+  autoRunReady?: boolean;
+  autoPr?: boolean;
+  autoMerge?: boolean;
+}
+
+export function animusDaemonConfigGet(
+  path: string,
+): Promise<AnimusCliResult<DaemonConfigData>> {
+  return invoke<AnimusCliResult<DaemonConfigData>>("animus_daemon_config_get", { path });
+}
+
+export function animusDaemonConfigSet(
+  path: string,
+  updates: DaemonConfigUpdate,
+): Promise<AnimusCliResult<DaemonConfigData>> {
+  return invoke<AnimusCliResult<DaemonConfigData>>("animus_daemon_config_set", {
+    path,
+    ...updates,
+  });
+}
+
 export function animusWorkflowConfig(
   path: string,
 ): Promise<AnimusCliResult<WorkflowConfigEnvelope>> {

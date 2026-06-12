@@ -40,3 +40,4 @@ target/
 .claude/
 .mcp.json
 .animus/*.lock
+.gstack/

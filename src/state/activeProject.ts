@@ -11,7 +11,8 @@ export type BridgeMode =
   | "visualize"
   | "subjects"
   | "secrets"
-  | "plugins";
+  | "plugins"
+  | "daemon";
 
 // "all-agents" and "plugins" are pseudo-projects — they live in the rail
 // but don't have a backing repo. They map to special bridge content.

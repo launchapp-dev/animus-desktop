@@ -156,6 +156,46 @@ pub fn start(app: AppHandle) {
     // of subprocess starts per minute. Now we lazily attach via
     // `bridge_attach_project` from the frontend when the user actually
     // selects a project. No global bridge.
+
+    // kill_on_drop only fires if this process exits cleanly; a force-killed
+    // app session leaks its stream children, which get reparented to PID 1
+    // and tail the event log forever. Reap those orphans at startup.
+    tauri::async_runtime::spawn(reap_orphaned_streams());
+}
+
+/// Kill `animus daemon stream` processes whose parent is gone (ppid == 1).
+/// Only orphans are touched — a concurrently running app instance keeps its
+/// own children because their ppid is that live instance, not 1.
+async fn reap_orphaned_streams() {
+    #[cfg(unix)]
+    {
+        let Ok(output) = Command::new("ps")
+            .args(["-axo", "pid=,ppid=,command="])
+            .output()
+            .await
+        else {
+            return;
+        };
+        let text = String::from_utf8_lossy(&output.stdout);
+        for line in text.lines() {
+            let mut parts = line.split_whitespace();
+            let (Some(pid), Some(ppid)) = (parts.next(), parts.next()) else {
+                continue;
+            };
+            let cmd = parts.collect::<Vec<_>>().join(" ");
+            if ppid == "1"
+                && cmd.contains("animus")
+                && cmd.contains("daemon stream")
+            {
+                if let Ok(pid) = pid.parse::<i32>() {
+                    unsafe {
+                        libc::kill(pid, libc::SIGTERM);
+                    }
+                    eprintln!("[bridge] reaped orphaned daemon stream pid {pid}");
+                }
+            }
+        }
+    }
 }
 
 #[tauri::command]

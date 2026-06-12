@@ -94,7 +94,7 @@ function TriggerNode({ data }: NodeProps) {
       className="rf-workflow-node"
       style={{
         borderColor: "var(--copper)",
-        background: "rgba(217,119,87,0.10)",
+        background: "var(--copper-bg-soft)",
       }}
     >
       <div className="rf-workflow-node__title" style={{ color: "var(--copper)" }}>
@@ -319,7 +319,7 @@ export function VisualizeView({ project }: { project: Project }) {
           fitView
           proOptions={{ hideAttribution: true }}
         >
-          <Background gap={24} color="rgba(255,255,255,0.05)" />
+          <Background gap={24} color="var(--bg-tint-5)" />
           <Controls position="bottom-right" />
         </ReactFlow>
       </div>

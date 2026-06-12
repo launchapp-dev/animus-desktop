@@ -240,6 +240,20 @@ export const daemonStop = (projectRoot?: string) =>
     binary_path: "/usr/local/bin/animus",
   });
 
+export const daemonRestart = (projectRoot?: string) =>
+  safeInvoke<DaemonStatus>(
+    "daemon_restart",
+    { projectRoot },
+    {
+      installed: true,
+      running: true,
+      version: "0.5.1",
+      pid: 4242,
+      plugins_installed: 4,
+      binary_path: "/usr/local/bin/animus",
+    },
+  );
+
 // Plugins
 export const pluginList = () =>
   safeInvoke<Plugin[]>("plugin_list", undefined, MOCK_PLUGINS);

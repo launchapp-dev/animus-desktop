@@ -511,11 +511,17 @@ fn chat_list_all_blocking(projects: Vec<ProjectRef>) -> Vec<ProjectConversation>
             let Some(id) = meta.get("id").and_then(|v| v.as_str()) else {
                 continue;
             };
+            let title = meta
+                .get("title")
+                .and_then(|v| v.as_str())
+                .filter(|t| !t.trim().is_empty())
+                .map(String::from)
+                .or_else(|| derive_title_from_messages(&entry.path()));
             out.push(ProjectConversation {
                 project_id: p.id.clone(),
                 project_name: p.name.clone(),
                 id: id.to_string(),
-                title: meta.get("title").and_then(|v| v.as_str()).map(String::from),
+                title,
                 tool: meta
                     .get("tool")
                     .and_then(|v| v.as_str())
@@ -536,6 +542,43 @@ fn chat_list_all_blocking(projects: Vec<ProjectRef>) -> Vec<ProjectConversation>
     // newest first
     out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
     out
+}
+
+/// Derive a display title from the first user message when `meta.json` has
+/// none — otherwise the rail fills with "Untitled chat". Streams only the
+/// head of `messages.jsonl` so the cross-project list scan stays cheap.
+fn derive_title_from_messages(conv_dir: &Path) -> Option<String> {
+    use std::io::{BufRead, BufReader, Read};
+    const MAX_SCAN_BYTES: u64 = 256 * 1024;
+    const MAX_TITLE_CHARS: usize = 48;
+    let file = std::fs::File::open(conv_dir.join("messages.jsonl")).ok()?;
+    let reader = BufReader::new(file.take(MAX_SCAN_BYTES));
+    for line in reader.lines() {
+        let Ok(line) = line else { break };
+        let Ok(msg) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+            continue;
+        };
+        if msg.get("role").and_then(|v| v.as_str()) != Some("user") {
+            continue;
+        }
+        let content = msg.get("content").and_then(|v| v.as_str())?;
+        let first_line = content
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty())?
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        if first_line.is_empty() {
+            return None;
+        }
+        let mut title: String = first_line.chars().take(MAX_TITLE_CHARS).collect();
+        if first_line.chars().count() > MAX_TITLE_CHARS {
+            title.push('…');
+        }
+        return Some(title);
+    }
+    None
 }
 
 /// Conversation ids become directory names — reject path separators and other
@@ -707,6 +750,7 @@ pub async fn chat_providers() -> Result<Vec<ProviderOption>, String> {
             vec![
                 "claude-fable-5",
                 "claude-opus-4-8",
+                "claude-fable-5",
                 "claude-opus-4-7",
                 "claude-sonnet-4-6",
                 "claude-haiku-4-5",
@@ -772,6 +816,41 @@ mod tests {
         assert!(!is_safe_conversation_id(".."));
         assert!(!is_safe_conversation_id("../etc"));
         assert!(!is_safe_conversation_id("a/b"));
+    }
+
+    #[test]
+    fn derive_title_from_messages_uses_first_user_line() {
+        let base =
+            std::env::temp_dir().join(format!("animus-chat-title-{}", std::process::id()));
+        let conv = base.join("conv-t");
+        std::fs::create_dir_all(&conv).unwrap();
+        std::fs::write(
+            conv.join("messages.jsonl"),
+            concat!(
+                r#"{"role":"assistant","content":"hello there"}"#,
+                "\n",
+                r#"{"role":"user","content":"\n  Fix the   journal pane layout\nplus more detail"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            derive_title_from_messages(&conv).as_deref(),
+            Some("Fix the journal pane layout"),
+        );
+
+        let long = "x".repeat(80);
+        std::fs::write(
+            conv.join("messages.jsonl"),
+            format!(r#"{{"role":"user","content":"{long}"}}"#),
+        )
+        .unwrap();
+        let t = derive_title_from_messages(&conv).unwrap();
+        assert_eq!(t.chars().count(), 49, "48 chars + ellipsis");
+        assert!(t.ends_with('…'));
+
+        std::fs::write(conv.join("messages.jsonl"), "").unwrap();
+        assert_eq!(derive_title_from_messages(&conv), None);
     }
 
     #[test]
