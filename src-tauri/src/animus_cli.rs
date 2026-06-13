@@ -205,6 +205,65 @@ pub async fn animus_flavor_current(path: String) -> Result<AnimusCliResult, Stri
     run_animus_json(&path, &["flavor", "current"]).await
 }
 
+fn valid_phase_id(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+}
+
+/// Create or replace a workflow definition. The CLI validates the JSON and
+/// writes it to the generated overlay — no manual YAML editing.
+#[tauri::command]
+pub async fn animus_workflow_definition_upsert(
+    path: String,
+    input_json: String,
+) -> Result<AnimusCliResult, String> {
+    serde_json::from_str::<Value>(&input_json)
+        .map_err(|e| format!("invalid workflow JSON: {e}"))?;
+    run_animus_json(
+        &path,
+        &["workflow", "definitions", "upsert", "--input-json", &input_json],
+    )
+    .await
+}
+
+/// Create or replace a phase definition in the generated overlay.
+#[tauri::command]
+pub async fn animus_workflow_phase_upsert(
+    path: String,
+    phase_id: String,
+    input_json: String,
+) -> Result<AnimusCliResult, String> {
+    let pid = phase_id.trim();
+    if !valid_phase_id(pid) {
+        return Err("invalid phase id: use lowercase letters, digits, '-', '_'".to_string());
+    }
+    serde_json::from_str::<Value>(&input_json)
+        .map_err(|e| format!("invalid phase JSON: {e}"))?;
+    run_animus_json(
+        &path,
+        &["workflow", "phases", "upsert", "--phase", pid, "--input-json", &input_json],
+    )
+    .await
+}
+
+/// Remove a generated-overlay phase definition (confirmation token required).
+#[tauri::command]
+pub async fn animus_workflow_phase_remove(
+    path: String,
+    phase_id: String,
+) -> Result<AnimusCliResult, String> {
+    let pid = phase_id.trim();
+    if !valid_phase_id(pid) {
+        return Err("invalid phase id".to_string());
+    }
+    run_animus_json(
+        &path,
+        &["workflow", "phases", "remove", "--phase", pid, "--confirm", pid],
+    )
+    .await
+}
+
 #[tauri::command]
 pub async fn animus_skill_list(path: String) -> Result<AnimusCliResult, String> {
     run_animus_json(&path, &["skill", "list"]).await

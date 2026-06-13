@@ -173,6 +173,45 @@ export function animusQueueList(path: string): Promise<AnimusCliResult<unknown>>
   return invoke<AnimusCliResult<unknown>>("animus_queue_list", { path });
 }
 
+// --- Workflow authoring (CLI upsert → generated overlay) ---------------------
+
+/** Create or replace a workflow definition. `def` = { id, name, description,
+ *  phases: string[] (phase ids) | { workflow_ref }[], budget? }. */
+export function animusWorkflowDefinitionUpsert(
+  path: string,
+  def: unknown,
+): Promise<AnimusCliResult<unknown>> {
+  return invoke<AnimusCliResult<unknown>>("animus_workflow_definition_upsert", {
+    path,
+    inputJson: JSON.stringify(def),
+  });
+}
+
+/** Create or replace a phase. `runtime` = { mode, agent_id?, directive?,
+ *  command?, decision_contract?, ... }. */
+export function animusWorkflowPhaseUpsert(
+  path: string,
+  phaseId: string,
+  runtime: unknown,
+): Promise<AnimusCliResult<unknown>> {
+  // The CLI expects the PhaseExecutionDefinition (the runtime object) directly.
+  return invoke<AnimusCliResult<unknown>>("animus_workflow_phase_upsert", {
+    path,
+    phaseId,
+    inputJson: JSON.stringify(runtime),
+  });
+}
+
+export function animusWorkflowPhaseRemove(
+  path: string,
+  phaseId: string,
+): Promise<AnimusCliResult<unknown>> {
+  return invoke<AnimusCliResult<unknown>>("animus_workflow_phase_remove", {
+    path,
+    phaseId,
+  });
+}
+
 // --- Flavor (project runtime composition) ------------------------------------
 
 export interface FlavorRoleSet {

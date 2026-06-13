@@ -10,10 +10,373 @@ import {
   type WorkflowSummary,
   type WorkflowYamlReport,
 } from "../../api/workflow_yaml";
-import { animusWorkflowRun, animusStatusGet, type AnimusStatus } from "../../api/animus";
+import {
+  animusWorkflowRun,
+  animusStatusGet,
+  animusWorkflowDefinitionUpsert,
+  animusWorkflowPhaseUpsert,
+  type AnimusStatus,
+} from "../../api/animus";
 import type { Project } from "../../types/contracts";
 import { AgentFace, type AgentState } from "../../components/AgentFace";
 import { useProjectAgentLiveStates } from "../../state/projectEvents";
+
+const SLUG_RE = /^[a-z0-9][a-z0-9_-]*$/;
+
+/** Compose a phase (agent or command) and upsert it to the generated overlay.
+ *  Returns the new phase id to the caller so the workflow composer can chain. */
+function PhaseComposer({
+  repoPath,
+  agents,
+  onSaved,
+  onCancel,
+}: {
+  repoPath: string;
+  agents: { id: string }[];
+  onSaved: (phaseId: string) => void;
+  onCancel: () => void;
+}) {
+  const [id, setId] = useState("");
+  const [mode, setMode] = useState<"agent" | "command">("agent");
+  const [agentId, setAgentId] = useState(agents[0]?.id ?? "swe");
+  const [directive, setDirective] = useState("");
+  const [gate, setGate] = useState(false);
+  const [program, setProgram] = useState("");
+  const [args, setArgs] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = async () => {
+    const pid = id.trim();
+    if (!SLUG_RE.test(pid)) {
+      setError("Phase id must be lowercase letters, digits, '-' or '_'.");
+      return;
+    }
+    const runtime =
+      mode === "agent"
+        ? {
+            mode: "agent",
+            agent_id: agentId,
+            directive: directive.trim() || null,
+            command: null,
+            capabilities: null,
+            decision_contract: gate ? { allow_missing_decision: false } : null,
+            default_tool: null,
+            manual: null,
+          }
+        : {
+            mode: "command",
+            agent_id: null,
+            directive: null,
+            command: {
+              program: program.trim(),
+              args: args.trim() ? args.trim().split(/\s+/) : [],
+              cwd_mode: "project_root",
+              success_exit_codes: [0],
+              timeout_secs: 120,
+              env: {},
+            },
+            capabilities: null,
+            decision_contract: null,
+          };
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await animusWorkflowPhaseUpsert(repoPath, pid, runtime);
+      if (res.ok) onSaved(pid);
+      else
+        setError(
+          (res.error && typeof res.error === "object" && "message" in res.error
+            ? String((res.error as { message: unknown }).message)
+            : null) ?? res.rawStderr ?? "phase upsert failed",
+        );
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="wf-compose__phase">
+      <div className="wf-compose__row">
+        <input
+          className="wf-input"
+          placeholder="phase-id"
+          value={id}
+          onChange={(e) => setId(e.target.value)}
+        />
+        <div className="wf-seg">
+          <button
+            type="button"
+            className={mode === "agent" ? "wf-seg__on" : ""}
+            onClick={() => setMode("agent")}
+          >
+            Agent
+          </button>
+          <button
+            type="button"
+            className={mode === "command" ? "wf-seg__on" : ""}
+            onClick={() => setMode("command")}
+          >
+            Command
+          </button>
+        </div>
+      </div>
+      {mode === "agent" ? (
+        <>
+          <label className="wf-field">
+            <span>Agent</span>
+            <select
+              className="wf-input"
+              value={agentId}
+              onChange={(e) => setAgentId(e.target.value)}
+            >
+              {agents.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.id}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="wf-field">
+            <span>Directive</span>
+            <textarea
+              className="wf-input"
+              rows={3}
+              placeholder="What should this agent do in this phase?"
+              value={directive}
+              onChange={(e) => setDirective(e.target.value)}
+            />
+          </label>
+          <label className="wf-check">
+            <input
+              type="checkbox"
+              checked={gate}
+              onChange={(e) => setGate(e.target.checked)}
+            />
+            <span>Decision gate (pauses for approve/reject)</span>
+          </label>
+        </>
+      ) : (
+        <div className="wf-compose__row">
+          <input
+            className="wf-input"
+            placeholder="program (e.g. cargo)"
+            value={program}
+            onChange={(e) => setProgram(e.target.value)}
+          />
+          <input
+            className="wf-input"
+            placeholder="args (space-separated)"
+            value={args}
+            onChange={(e) => setArgs(e.target.value)}
+          />
+        </div>
+      )}
+      {error && <div className="wf-compose__err">{error}</div>}
+      <div className="wf-compose__actions">
+        <button
+          type="button"
+          className="workflow-row__run"
+          disabled={busy || !SLUG_RE.test(id.trim())}
+          onClick={() => void save()}
+        >
+          {busy ? "Saving…" : "Save phase"}
+        </button>
+        <button type="button" className="plugins-pane__ghost" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Compose a workflow from ordered phases (existing or freshly authored). */
+function WorkflowComposer({
+  repoPath,
+  availablePhases,
+  agents,
+  onSaved,
+  onRefresh,
+  onCancel,
+}: {
+  repoPath: string;
+  availablePhases: string[];
+  agents: { id: string }[];
+  onSaved: () => void;
+  onRefresh: () => void;
+  onCancel: () => void;
+}) {
+  const [id, setId] = useState("");
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [phases, setPhases] = useState<string[]>([]);
+  const [picker, setPicker] = useState("");
+  const [newPhase, setNewPhase] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Existing phases + any newly authored ones not already in the picker list.
+  const pickable = useMemo(
+    () => Array.from(new Set([...availablePhases])).sort(),
+    [availablePhases],
+  );
+
+  const addPhase = (p: string) => {
+    if (p && !phases.includes(p)) setPhases((prev) => [...prev, p]);
+    setPicker("");
+  };
+  const move = (i: number, d: -1 | 1) =>
+    setPhases((prev) => {
+      const next = [...prev];
+      const j = i + d;
+      if (j < 0 || j >= next.length) return prev;
+      [next[i], next[j]] = [next[j]!, next[i]!];
+      return next;
+    });
+
+  const save = async () => {
+    const wid = id.trim();
+    if (!SLUG_RE.test(wid)) {
+      setError("Workflow id must be lowercase letters, digits, '-' or '_'.");
+      return;
+    }
+    if (phases.length === 0) {
+      setError("Add at least one phase.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await animusWorkflowDefinitionUpsert(repoPath, {
+        id: wid,
+        name: name.trim() || wid,
+        description: description.trim(),
+        phases,
+        budget: null,
+      });
+      if (res.ok) onSaved();
+      else
+        setError(
+          (res.error && typeof res.error === "object" && "message" in res.error
+            ? String((res.error as { message: unknown }).message)
+            : null) ?? res.rawStderr ?? "workflow upsert failed",
+        );
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="wf-compose">
+      <div className="wf-compose__head">
+        <h3 className="workflows-pane__group-title">New workflow</h3>
+      </div>
+      <div className="wf-compose__row">
+        <input
+          className="wf-input"
+          placeholder="workflow-id"
+          value={id}
+          onChange={(e) => setId(e.target.value)}
+        />
+        <input
+          className="wf-input"
+          placeholder="Display name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+      </div>
+      <input
+        className="wf-input"
+        placeholder="Description"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+      />
+
+      <div className="wf-compose__phases">
+        <div className="wf-compose__label">Phases (run in order)</div>
+        {phases.length === 0 ? (
+          <div className="wf-compose__empty">No phases yet — add one below.</div>
+        ) : (
+          <ol className="wf-phaselist">
+            {phases.map((p, i) => (
+              <li key={p} className="wf-phaselist__item">
+                <span className="wf-phaselist__idx">{i + 1}</span>
+                <span className="wf-phaselist__name">{p}</span>
+                <div className="wf-phaselist__ctrls">
+                  <button type="button" onClick={() => move(i, -1)} disabled={i === 0} aria-label="Move up">↑</button>
+                  <button type="button" onClick={() => move(i, 1)} disabled={i === phases.length - 1} aria-label="Move down">↓</button>
+                  <button
+                    type="button"
+                    onClick={() => setPhases((prev) => prev.filter((x) => x !== p))}
+                    aria-label="Remove"
+                  >
+                    ×
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
+
+        {newPhase ? (
+          <PhaseComposer
+            repoPath={repoPath}
+            agents={agents}
+            onSaved={(pid) => {
+              addPhase(pid);
+              setNewPhase(false);
+              onRefresh(); // refresh so the new phase shows in the picker too
+            }}
+            onCancel={() => setNewPhase(false)}
+          />
+        ) : (
+          <div className="wf-compose__add">
+            <select
+              className="wf-input"
+              value={picker}
+              onChange={(e) => addPhase(e.target.value)}
+            >
+              <option value="">+ Add existing phase…</option>
+              {pickable
+                .filter((p) => !phases.includes(p))
+                .map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+            </select>
+            <button
+              type="button"
+              className="plugins-pane__ghost"
+              onClick={() => setNewPhase(true)}
+            >
+              + New phase
+            </button>
+          </div>
+        )}
+      </div>
+
+      {error && <div className="wf-compose__err">{error}</div>}
+      <div className="wf-compose__actions">
+        <button
+          type="button"
+          className="workflow-row__run"
+          disabled={busy || !SLUG_RE.test(id.trim()) || phases.length === 0}
+          onClick={() => void save()}
+        >
+          {busy ? "Saving…" : "Create workflow"}
+        </button>
+        <button type="button" className="plugins-pane__ghost" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </section>
+  );
+}
 
 function phaseAgentState(mode: string | null | undefined): AgentState {
   if (mode === "command") return "running";
@@ -529,6 +892,7 @@ export function WorkflowsView({ project }: { project: Project }) {
   const [tab, setTab] = useState<TabKey>("workflows");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
+  const [composing, setComposing] = useState(false);
   const [fileView, setFileView] = useState<FileView | null>(null);
   const agentLiveStates = useProjectAgentLiveStates(project.id);
 
@@ -746,6 +1110,17 @@ export function WorkflowsView({ project }: { project: Project }) {
           </span>
           <button
             type="button"
+            className="workflow-row__run"
+            onClick={() => {
+              setTab("workflows");
+              setComposing(true);
+            }}
+            style={{ marginLeft: 8 }}
+          >
+            New workflow
+          </button>
+          <button
+            type="button"
             className="plugins-pane__ghost"
             onClick={() => void refresh()}
             disabled={loading}
@@ -807,7 +1182,21 @@ export function WorkflowsView({ project }: { project: Project }) {
         <div className="workflows-pane__toast">{runResult}</div>
       )}
 
-      {tab === "workflows" && (
+      {tab === "workflows" && composing && (
+        <WorkflowComposer
+          repoPath={project.repo_path?.trim() ?? ""}
+          availablePhases={report.phases.map((p) => p.id)}
+          agents={report.agents.map((a) => ({ id: a.id }))}
+          onSaved={() => {
+            setComposing(false);
+            void refresh();
+          }}
+          onRefresh={() => void refresh()}
+          onCancel={() => setComposing(false)}
+        />
+      )}
+
+      {tab === "workflows" && !composing && (
         <section className="workflows-pane__group">
           {filteredWorkflows.length === 0 ? (
             <p style={{ color: "var(--text-faint)", fontSize: 12 }}>
