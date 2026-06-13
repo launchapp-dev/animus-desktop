@@ -172,3 +172,219 @@ export function animusWorkflowRun(
 export function animusQueueList(path: string): Promise<AnimusCliResult<unknown>> {
   return invoke<AnimusCliResult<unknown>>("animus_queue_list", { path });
 }
+
+// --- Flavor (project runtime composition) ------------------------------------
+
+export interface FlavorRoleSet {
+  required: string[];
+  recommended: string[];
+}
+
+export interface FlavorManifest {
+  id: string;
+  version: string;
+  title: string;
+  description: string;
+  providers?: FlavorRoleSet;
+  subjects?: FlavorRoleSet;
+  transports?: FlavorRoleSet;
+  ui?: FlavorRoleSet;
+  triggers?: FlavorRoleSet;
+  workflow_runner?: FlavorRoleSet;
+  queue?: FlavorRoleSet;
+  durable_store?: FlavorRoleSet;
+  memory_store?: FlavorRoleSet;
+  packs?: FlavorRoleSet;
+}
+
+export interface FlavorCurrent {
+  name: string;
+  source: string;
+  installed: boolean;
+  drift: { plugin: string; role: string; installed: boolean }[];
+  manifest: FlavorManifest;
+}
+
+export function animusFlavorCurrent(
+  path: string,
+): Promise<AnimusCliResult<FlavorCurrent>> {
+  return invoke<AnimusCliResult<FlavorCurrent>>("animus_flavor_current", { path });
+}
+
+// --- Skills ------------------------------------------------------------------
+
+export interface SkillSummary {
+  name: string;
+  description: string;
+  category: string | null;
+  /** "project" | "user" | "installed" | "builtin" | "pack:<id>" | "agent-host:<host>/<scope>" */
+  source: string;
+  type: string;
+}
+
+export interface SkillDetail {
+  name: string;
+  description: string;
+  category: string | null;
+  version?: string | null;
+  source: string;
+  prompt?: {
+    system?: string | null;
+    prefix?: string | null;
+    suffix?: string | null;
+    directives?: string[];
+  };
+  mcp_servers?: string[];
+  tags?: string[];
+  capabilities?: Record<string, boolean>;
+  adapters?: string[];
+  timeout_secs?: number | null;
+}
+
+export function animusSkillList(path: string): Promise<AnimusCliResult<SkillSummary[]>> {
+  return invoke<AnimusCliResult<SkillSummary[]>>("animus_skill_list", { path });
+}
+
+export function animusSkillInfo(
+  path: string,
+  name: string,
+): Promise<AnimusCliResult<SkillDetail>> {
+  return invoke<AnimusCliResult<SkillDetail>>("animus_skill_info", { path, name });
+}
+
+export interface SkillSaveArgs {
+  path: string;
+  name: string;
+  description?: string;
+  category?: string;
+  version?: string;
+  systemPrompt?: string;
+  mcpServers?: string[];
+  tags?: string[];
+}
+
+export function animusSkillSave(args: SkillSaveArgs): Promise<void> {
+  return invoke<void>("animus_skill_save", { args });
+}
+
+export function animusSkillDelete(path: string, name: string): Promise<void> {
+  return invoke<void>("animus_skill_delete", { path, name });
+}
+
+export interface SkillInstallArgs {
+  path: string;
+  name?: string;
+  version?: string;
+  /** Local Markdown skill file/folder to install. */
+  localPath?: string;
+  source?: string;
+}
+
+export function animusSkillInstall(
+  args: SkillInstallArgs,
+): Promise<AnimusCliResult<unknown>> {
+  return invoke<AnimusCliResult<unknown>>("animus_skill_install", {
+    path: args.path,
+    name: args.name ?? null,
+    version: args.version ?? null,
+    localPath: args.localPath ?? null,
+    source: args.source ?? null,
+  });
+}
+
+/** Re-resolve one installed skill, or all when `name` is omitted. */
+export function animusSkillUpdate(
+  path: string,
+  name?: string,
+): Promise<AnimusCliResult<unknown>> {
+  return invoke<AnimusCliResult<unknown>>("animus_skill_update", {
+    path,
+    name: name ?? null,
+  });
+}
+
+/** Uninstall a registry/installed skill (not project-scope YAML). */
+export function animusSkillUninstall(
+  path: string,
+  name: string,
+): Promise<AnimusCliResult<unknown>> {
+  return invoke<AnimusCliResult<unknown>>("animus_skill_uninstall", { path, name });
+}
+
+// --- Phase gates --------------------------------------------------------------
+
+export function animusPhaseGate(args: {
+  path: string;
+  workflowId: string;
+  phaseId: string;
+  decision: "approve" | "reject";
+  note?: string;
+}): Promise<AnimusCliResult<unknown>> {
+  return invoke<AnimusCliResult<unknown>>("animus_phase_gate", {
+    path: args.path,
+    workflowId: args.workflowId,
+    phaseId: args.phaseId,
+    decision: args.decision,
+    note: args.note ?? null,
+  });
+}
+
+// --- Interactions (questions + approvals; animus >= 0.5.15) ------------------
+
+export interface InteractionQuestionOption {
+  label: string;
+  description?: string | null;
+}
+
+export interface InteractionQuestion {
+  question: string;
+  header?: string | null;
+  options: InteractionQuestionOption[];
+  multi_select?: boolean;
+}
+
+export interface InteractionRecord {
+  id: string;
+  kind: "question" | "approval";
+  agent_id: string;
+  workflow_id?: string | null;
+  task_id?: string | null;
+  created_at: string;
+  question?: string | null;
+  action?: string | null;
+  options?: string[];
+  tool_name?: string | null;
+  arguments?: unknown;
+  questions?: InteractionQuestion[];
+  timeout_secs?: number | null;
+  suspended?: boolean;
+  status: "pending" | "answered" | "expired";
+  answer?: string | null;
+  answer_message?: string | null;
+  answers?: Record<string, string | string[]> | null;
+  answered_at?: string | null;
+  answered_by?: string | null;
+}
+
+export function animusInteractionsList(
+  path: string,
+  all: boolean,
+): Promise<AnimusCliResult<unknown>> {
+  return invoke<AnimusCliResult<unknown>>("animus_interactions_list", { path, all });
+}
+
+export interface InteractionsAnswerArgs {
+  path: string;
+  id: string;
+  decision?: "allow" | "deny";
+  text?: string;
+  /** Structured selections, each "<question text>=label[,label…]". */
+  selects?: string[];
+  message?: string;
+}
+
+export function animusInteractionsAnswer(
+  args: InteractionsAnswerArgs,
+): Promise<AnimusCliResult<unknown>> {
+  return invoke<AnimusCliResult<unknown>>("animus_interactions_answer", { args });
+}

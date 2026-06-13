@@ -12,7 +12,7 @@ function isObj(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
 
-function statusTone(s: string): string {
+export function statusTone(s: string): string {
   const l = s.toLowerCase();
   if (["pending", "ready", "queued"].includes(l)) return "blue";
   if (["assigned", "running", "in-progress", "in_progress"].includes(l)) return "brass";
@@ -21,7 +21,7 @@ function statusTone(s: string): string {
   return "gray";
 }
 
-function StatusPill({ status }: { status: string }) {
+export function StatusPill({ status }: { status: string }) {
   return (
     <span className={`aj-pill aj-pill--${statusTone(status)}`}>{status}</span>
   );

@@ -160,7 +160,6 @@ function AppShell() {
         style={
           {
             "--sidebar-width": "15rem",
-            "--sidebar-width-icon": "3rem",
           } as React.CSSProperties
         }
       >

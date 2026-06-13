@@ -140,6 +140,64 @@ pub async fn plugin_install(app: AppHandle, name: String) -> Result<(), String> 
 }
 
 #[tauri::command]
+pub async fn plugin_update(app: AppHandle, name: Option<String>) -> Result<(), String> {
+    let bin = crate::daemon::resolve_animus_binary().await.ok_or_else(|| "animus binary not found".to_string())?;
+    let label = name.as_deref().unwrap_or("all plugins");
+    emit_progress(&app, "downloading", Some(10), &format!("Updating {label}"));
+    let mut cmd = Command::new(&bin);
+    // `--yes` skips the interactive confirmation prompt, which would hang a
+    // headless child process.
+    cmd.arg("plugin").arg("update").arg("--yes");
+    match name.as_deref().map(str::trim) {
+        Some(n) if !n.is_empty() => {
+            cmd.arg("--name").arg(n);
+        }
+        _ => {
+            cmd.arg("--all");
+        }
+    }
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("failed to run animus plugin update: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        emit_progress(&app, "error", None, &stderr);
+        return Err(format!("plugin update failed ({}): {}", output.status, stderr));
+    }
+    emit_progress(&app, "done", Some(100), &format!("Updated {label}"));
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn plugin_uninstall(app: AppHandle, name: String) -> Result<(), String> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("plugin name is required".to_string());
+    }
+    let bin = crate::daemon::resolve_animus_binary().await.ok_or_else(|| "animus binary not found".to_string())?;
+    emit_progress(&app, "downloading", Some(10), &format!("Uninstalling {name}"));
+    let output = Command::new(&bin)
+        .arg("plugin")
+        .arg("uninstall")
+        .arg("--name")
+        .arg(&name)
+        .output()
+        .await
+        .map_err(|e| format!("failed to run animus plugin uninstall: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        emit_progress(&app, "error", None, &stderr);
+        return Err(format!(
+            "plugin uninstall failed ({}): {}",
+            output.status, stderr
+        ));
+    }
+    emit_progress(&app, "done", Some(100), &format!("Uninstalled {name}"));
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn plugin_install_defaults(app: AppHandle) -> Result<(), String> {
     let bin = crate::daemon::resolve_animus_binary().await.ok_or_else(|| "animus binary not found".to_string())?;
     emit_progress(

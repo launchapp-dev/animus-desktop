@@ -304,7 +304,7 @@ export function ProjectsRail({
   })();
 
   return (
-    <Sidebar variant="sidebar" collapsible="icon">
+    <Sidebar variant="sidebar" collapsible="offcanvas">
       <SidebarHeader className="flex-col gap-2 px-3 pt-2">
         <div className="flex items-center gap-2 h-7">
           <span

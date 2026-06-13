@@ -16,6 +16,8 @@ import { SecretsView } from "../views/project/SecretsView";
 import { JournalView } from "../views/project/JournalView";
 import { StreamView } from "../views/project/StreamView";
 import { ChatView } from "../views/project/ChatView";
+import { SkillsView } from "../views/project/SkillsView";
+import { InboxView } from "../views/project/InboxView";
 import type { Project } from "../types/contracts";
 import { useEffect, useRef, useState } from "react";
 import { useBridgeStatus } from "../state/projectEvents";
@@ -27,6 +29,7 @@ import {
 const MODE_TAB_GROUPS: { key: BridgeMode; label: string }[][] = [
   [
     { key: "chat", label: "Chat" },
+    { key: "inbox", label: "Inbox" },
     { key: "journal", label: "Journal" },
     { key: "stream", label: "Stream" },
     { key: "workflows", label: "Workflows" },
@@ -40,6 +43,7 @@ const MODE_TAB_GROUPS: { key: BridgeMode; label: string }[][] = [
   [
     { key: "daemon", label: "Daemon" },
     { key: "mcp", label: "MCP" },
+    { key: "skills", label: "Skills" },
     { key: "secrets", label: "Secrets" },
     { key: "plugins", label: "Plugins" },
   ],
@@ -185,6 +189,8 @@ function ProjectModeContent({
   switch (mode) {
     case "chat":
       return <ChatView project={project} />;
+    case "inbox":
+      return <InboxView project={project} />;
     case "journal":
       return <JournalView project={project} />;
     case "stream":
@@ -203,8 +209,10 @@ function ProjectModeContent({
       return <VisualizeView project={project} />;
     case "secrets":
       return <SecretsView project={project} />;
+    case "skills":
+      return <SkillsView project={project} />;
     case "plugins":
-      return <PluginsView />;
+      return <PluginsView project={project} />;
     case "daemon":
       return <DaemonView project={project} />;
   }

@@ -271,6 +271,12 @@ export const pluginInstall = (name: string) =>
     },
   );
 
+export const pluginUpdate = (name?: string) =>
+  safeInvoke<void>("plugin_update", { name: name ?? null }, undefined);
+
+export const pluginUninstall = (name: string) =>
+  safeInvoke<void>("plugin_uninstall", { name }, undefined);
+
 // GitHub auth
 export const githubAuthStatus = () =>
   safeInvoke<AuthStatus>("github_auth_status", undefined, {

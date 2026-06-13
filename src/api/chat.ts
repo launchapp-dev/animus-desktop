@@ -34,6 +34,8 @@ export function chatAgentRun(args: {
   reasoningEffort?: string;
   /** Agent profile id — wires the profile's MCP servers (v0.5.12+). */
   agentId?: string;
+  /** Skill id — injects the skill's system prompt + MCP servers (v0.5.14+). */
+  skill?: string;
 }): Promise<void> {
   return invoke<void>("chat_agent_run", {
     args: {
@@ -46,6 +48,7 @@ export function chatAgentRun(args: {
       timeoutSecs: args.timeoutSecs ?? null,
       reasoningEffort: args.reasoningEffort ?? null,
       agentId: args.agentId ?? null,
+      skill: args.skill ?? null,
     },
   });
 }

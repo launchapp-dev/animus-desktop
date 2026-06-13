@@ -14,11 +14,14 @@ import type { Project } from "../../types/contracts";
 const DEFAULT_KINDS = ["task", "requirement"] as const;
 
 // Normalized status buckets the CLI understands (`--status`).
-const STATUSES = ["ready", "in_progress", "blocked", "done"] as const;
+const STATUSES = ["ready", "in_progress", "blocked", "cancelled", "done"] as const;
 const STATUS_LABEL: Record<string, string> = {
   ready: "Ready",
   in_progress: "In progress",
   blocked: "Blocked",
+  // The daemon's stale-run reconcile projects Cancelled (not Blocked) when
+  // the terminal workflow died cancelled (animus > 0.5.14).
+  cancelled: "Cancelled",
   done: "Done",
 };
 
@@ -29,6 +32,7 @@ function statusModifier(status: string): string {
     case "done":
       return "done";
     case "blocked":
+    case "cancelled":
       return "blocked";
     case "in_progress":
       return "active";

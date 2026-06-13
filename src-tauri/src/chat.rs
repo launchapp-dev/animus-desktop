@@ -173,6 +173,99 @@ pub struct ChatRunArgs {
     /// Agent profile id — wires the profile's declared MCP servers into the
     /// chat session (`animus chat send --agent <id>`, v0.5.12+).
     pub agent_id: Option<String>,
+    /// Skill id — injects the skill's system prompt + MCP servers on every
+    /// turn (`animus chat send --skill <id>`, v0.5.14+). The desktop passes
+    /// `animus-copilot` for the default agent; the skill file is materialized
+    /// into the project on demand.
+    pub skill: Option<String>,
+}
+
+// --- Copilot skill (default-agent persona) ----------------------------------
+
+const COPILOT_SKILL_ID: &str = "animus-copilot";
+const COPILOT_SKILL_YAML: &str = include_str!("../assets/animus-copilot.yaml");
+/// Must match the `version:` line in the asset (unit-tested) — bump both when
+/// the prompt changes so existing projects pick up the update.
+const COPILOT_SKILL_VERSION: &str = "1.0.0";
+const COPILOT_MANAGED_MARKER: &str = "managed-by: animus-desktop";
+
+/// Mirror of the CLI's `validate_skill_slug`: lowercase alnum, `-`, `_`.
+pub(crate) fn valid_skill_slug(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+}
+
+/// Extract `(major, minor, patch)` from `animus --version` output
+/// (e.g. `animus 0.5.14`).
+fn parse_cli_version(text: &str) -> Option<(u64, u64, u64)> {
+    let token = text.split_whitespace().find(|t| {
+        t.split('.').count() >= 3 && t.chars().next().is_some_and(|c| c.is_ascii_digit())
+    })?;
+    let mut parts = token.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    // Tolerate suffixes like `14-rc1`.
+    let patch = parts
+        .next()?
+        .split(|c: char| !c.is_ascii_digit())
+        .next()?
+        .parse()
+        .ok()?;
+    Some((major, minor, patch))
+}
+
+fn version_supports_skill(v: (u64, u64, u64)) -> bool {
+    v >= (0, 5, 14)
+}
+
+/// Whether the installed CLI accepts `--skill` on `chat send`. Cached for the
+/// process lifetime — an older CLI would hard-fail the spawn on the unknown
+/// flag, so we degrade silently instead.
+async fn skill_flag_supported(bin: &Path) -> bool {
+    static SUPPORTED: tokio::sync::OnceCell<bool> = tokio::sync::OnceCell::const_new();
+    *SUPPORTED
+        .get_or_init(|| async {
+            match Command::new(bin).arg("--version").output().await {
+                Ok(o) if o.status.success() => String::from_utf8(o.stdout)
+                    .ok()
+                    .and_then(|s| parse_cli_version(&s))
+                    .map(version_supports_skill)
+                    .unwrap_or(false),
+                _ => false,
+            }
+        })
+        .await
+}
+
+fn skill_file_version(body: &str) -> Option<String> {
+    body.lines()
+        .find_map(|l| l.strip_prefix("version:"))
+        .map(|v| v.trim().trim_matches('"').to_string())
+}
+
+/// Idempotently write the bundled copilot skill into the project's skill
+/// definitions. A user-authored file (no managed-by marker) is never touched —
+/// project scope means theirs wins, which is the intended override hatch.
+fn materialize_copilot_skill(repo: &Path) -> Result<(), String> {
+    let dir = repo
+        .join(".animus")
+        .join("config")
+        .join("skill_definitions");
+    let target = dir.join(format!("{COPILOT_SKILL_ID}.yaml"));
+    if let Ok(existing) = std::fs::read_to_string(&target) {
+        if !existing.contains(COPILOT_MANAGED_MARKER) {
+            return Ok(());
+        }
+        if skill_file_version(&existing).as_deref() == Some(COPILOT_SKILL_VERSION) {
+            return Ok(());
+        }
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let tmp = target.with_extension("yaml.tmp");
+    std::fs::write(&tmp, COPILOT_SKILL_YAML.as_bytes()).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &target).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Spawn `animus chat send` (v0.5.10+ multi-turn) and stream its JSON event
@@ -228,6 +321,34 @@ pub async fn chat_agent_run(
     if let Some(agent) = args.agent_id.as_deref() {
         if !agent.trim().is_empty() {
             cmd.arg("--agent").arg(agent.trim());
+        }
+    }
+    if let Some(skill) = args.skill.as_deref().map(str::trim) {
+        if valid_skill_slug(skill) && skill_flag_supported(&bin).await {
+            let mut resolvable = true;
+            if skill == COPILOT_SKILL_ID {
+                let repo_for_skill = repo.clone();
+                let written =
+                    tokio::task::spawn_blocking(move || materialize_copilot_skill(&repo_for_skill))
+                        .await
+                        .map_err(|e| e.to_string())
+                        .and_then(|r| r);
+                if let Err(e) = written {
+                    // Non-fatal — but only pass the flag if a prior write (or
+                    // a user-authored file) already makes the skill resolvable,
+                    // else the CLI would fail the whole turn on an unknown skill.
+                    eprintln!("chat: copilot skill materialization failed: {e}");
+                    resolvable = repo
+                        .join(".animus")
+                        .join("config")
+                        .join("skill_definitions")
+                        .join(format!("{COPILOT_SKILL_ID}.yaml"))
+                        .is_file();
+                }
+            }
+            if resolvable {
+                cmd.arg("--skill").arg(skill);
+            }
         }
     }
     // Positional message arg comes last, after `--` so a prompt starting
@@ -874,5 +995,86 @@ mod tests {
         assert!(read_meta(&conv).unwrap().get("title").unwrap().is_null(), "blank clears title");
 
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn valid_skill_slug_accepts_slugs_rejects_traversal() {
+        assert!(valid_skill_slug("animus-copilot"));
+        assert!(valid_skill_slug("my_skill2"));
+        assert!(!valid_skill_slug(""));
+        assert!(!valid_skill_slug("../x"));
+        assert!(!valid_skill_slug("Animus"));
+        assert!(!valid_skill_slug("a b"));
+    }
+
+    #[test]
+    fn parse_cli_version_gates_skill_flag() {
+        assert_eq!(parse_cli_version("animus 0.5.14"), Some((0, 5, 14)));
+        assert_eq!(parse_cli_version("0.6.0"), Some((0, 6, 0)));
+        assert_eq!(parse_cli_version("animus 1.0.0-rc1"), Some((1, 0, 0)));
+        assert_eq!(parse_cli_version("garbage"), None);
+        assert!(version_supports_skill((0, 5, 14)));
+        assert!(version_supports_skill((0, 6, 0)));
+        assert!(!version_supports_skill((0, 5, 13)));
+    }
+
+    #[test]
+    fn copilot_skill_yaml_is_consistent() {
+        assert!(COPILOT_SKILL_YAML.contains(COPILOT_MANAGED_MARKER), "marker present");
+        assert!(COPILOT_SKILL_YAML.contains(&format!("name: {COPILOT_SKILL_ID}")));
+        assert_eq!(
+            skill_file_version(COPILOT_SKILL_YAML).as_deref(),
+            Some(COPILOT_SKILL_VERSION),
+            "embedded version constant matches the asset",
+        );
+        // extra_args/overrides on a skill disable native session resume in the
+        // CLI — the copilot skill must stay free of them.
+        assert!(!COPILOT_SKILL_YAML.contains("extra_args"));
+        assert!(!COPILOT_SKILL_YAML.contains("codex_config_overrides"));
+        let parsed: serde_yaml::Value =
+            serde_yaml::from_str(COPILOT_SKILL_YAML).expect("asset parses as YAML");
+        assert!(
+            !parsed["prompt"]["system"].as_str().unwrap_or("").is_empty(),
+            "system prompt present",
+        );
+    }
+
+    #[test]
+    fn materialize_copilot_skill_write_update_and_user_override() {
+        let repo =
+            std::env::temp_dir().join(format!("animus-chat-skill-{}", std::process::id()));
+        std::fs::create_dir_all(&repo).unwrap();
+        let target = repo
+            .join(".animus")
+            .join("config")
+            .join("skill_definitions")
+            .join("animus-copilot.yaml");
+
+        materialize_copilot_skill(&repo).unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), COPILOT_SKILL_YAML, "written when absent");
+
+        // Managed file with an older version is rewritten.
+        let stale = COPILOT_SKILL_YAML.replace(
+            &format!("version: \"{COPILOT_SKILL_VERSION}\""),
+            "version: \"0.0.1\"",
+        );
+        assert_ne!(stale, COPILOT_SKILL_YAML);
+        std::fs::write(&target, &stale).unwrap();
+        materialize_copilot_skill(&repo).unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), COPILOT_SKILL_YAML, "stale managed file updated");
+
+        // Same version → untouched (mtime-free check via sentinel suffix).
+        let current = format!("{COPILOT_SKILL_YAML}# sentinel\n");
+        std::fs::write(&target, &current).unwrap();
+        materialize_copilot_skill(&repo).unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), current, "same version is a no-op");
+
+        // User-authored file (no marker) is never overwritten.
+        let user = "name: animus-copilot\nversion: \"9.9.9\"\nprompt:\n  system: mine\n";
+        std::fs::write(&target, user).unwrap();
+        materialize_copilot_skill(&repo).unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), user, "user file untouched");
+
+        std::fs::remove_dir_all(&repo).ok();
     }
 }

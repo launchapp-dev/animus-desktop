@@ -846,6 +846,7 @@ export function ChatView({ project }: { project: Project }) {
         timeoutSecs: 600,
         reasoningEffort: effort || undefined,
         agentId: agentId || undefined,
+        skill: agentId ? undefined : "animus-copilot",
       });
     } catch (e) {
       const entry = sessions.get(sessionId);

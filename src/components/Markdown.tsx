@@ -1,9 +1,10 @@
 import { memo, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import { AnimusJson } from "./AnimusJson";
+import { AnimusStub, ANIMUS_STUB_LANGS } from "./AnimusStubs";
 
 interface Props {
   children: string;
@@ -33,6 +34,31 @@ function ExternalLink({
   );
 }
 
+// `animus:team` etc. — lenient on separator/case since the fence tag is
+// model-emitted. The fence language survives micromark intact, so it arrives
+// here as a `language-animus:<type>` class on the code element.
+const STUB_RE = /^language-animus[:_-]([a-z]+)$/i;
+
+/** Route `animus:<type>` fences to the stub renderers; everything else stays
+ *  a normal `<pre>`. Overriding `pre` (not `code`) lets stubs render block
+ *  components without a surrounding pre. */
+function Pre(props: { children?: React.ReactNode } & ExtraProps) {
+  const codeEl = props.node?.children?.[0];
+  if (codeEl?.type === "element") {
+    const cls = codeEl.properties?.className;
+    const classes = Array.isArray(cls) ? cls.map(String) : [];
+    for (const c of classes) {
+      const m = STUB_RE.exec(c);
+      if (m) {
+        const first = codeEl.children?.[0];
+        const raw = first?.type === "text" ? first.value : "";
+        return <AnimusStub type={m[1].toLowerCase()} raw={raw} />;
+      }
+    }
+  }
+  return <pre>{props.children}</pre>;
+}
+
 /** One markdown renderer for the whole app: GFM (tables, task lists,
  *  strikethrough, autolinks) + highlight.js code highlighting + safe
  *  external links. Memoized since transcript/chat re-render often. */
@@ -41,8 +67,10 @@ export const Markdown = memo(function Markdown({ children, className }: Props) {
     <div className={`md ${className ?? ""}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
-        components={{ a: ExternalLink }}
+        rehypePlugins={[
+          [rehypeHighlight, { detect: true, plainText: ANIMUS_STUB_LANGS }],
+        ]}
+        components={{ a: ExternalLink, pre: Pre }}
       >
         {children}
       </ReactMarkdown>

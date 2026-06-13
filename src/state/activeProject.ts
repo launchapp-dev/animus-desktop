@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 export type BridgeMode =
   | "chat"
+  | "inbox"
   | "journal"
   | "stream"
   | "workflows"
@@ -11,6 +12,7 @@ export type BridgeMode =
   | "visualize"
   | "subjects"
   | "secrets"
+  | "skills"
   | "plugins"
   | "daemon";
 

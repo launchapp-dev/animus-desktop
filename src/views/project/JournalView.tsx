@@ -15,6 +15,7 @@ import {
   type WorkflowRunSummary,
   type HistoricalEvent,
 } from "../../api/event_log";
+import { animusPhaseGate } from "../../api/animus";
 import type { Project } from "../../types/contracts";
 import {
   ALL_CATS,
@@ -160,18 +161,109 @@ function buildTranscript(events: HistoricalEvent[]): NormalizedEvent[] {
   return collapseStreamingMessages(out);
 }
 
+/** Approve/Reject controls for a run paused on a phase gate. The CLI applies
+ *  the decision to the named phase of the paused workflow; reject requires a
+ *  note. Shown only while the run reports `paused`. */
+function PhaseGateBar({
+  run,
+  repoPath,
+  onDecided,
+}: {
+  run: WorkflowRunSummary;
+  repoPath: string;
+  onDecided: () => void;
+}) {
+  const [phase, setPhase] = useState(run.phases[run.phases.length - 1] ?? "");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const decide = async (decision: "approve" | "reject") => {
+    if (!phase) return;
+    setBusy(decision);
+    setError(null);
+    try {
+      const res = await animusPhaseGate({
+        path: repoPath,
+        workflowId: run.wfUuid,
+        phaseId: phase,
+        decision,
+        note: note.trim() || undefined,
+      });
+      if (!res.ok) {
+        setError(
+          (res.error && typeof res.error === "object" && "message" in res.error
+            ? String((res.error as { message: unknown }).message)
+            : null) ?? res.rawStderr ?? "gate decision failed",
+        );
+      } else {
+        onDecided();
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="gate-bar">
+      <span className="gate-bar__label">Paused on a phase gate</span>
+      <select
+        className="gate-bar__phase"
+        value={phase}
+        onChange={(e) => setPhase(e.target.value)}
+      >
+        {run.phases.map((p) => (
+          <option key={p} value={p}>
+            {p}
+          </option>
+        ))}
+      </select>
+      <input
+        className="gate-bar__note"
+        placeholder="Note (required to reject)…"
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+      />
+      <button
+        type="button"
+        className="ix-allow"
+        disabled={busy !== null || !phase}
+        onClick={() => void decide("approve")}
+      >
+        {busy === "approve" ? "Approving…" : "Approve"}
+      </button>
+      <button
+        type="button"
+        className="ix-deny"
+        disabled={busy !== null || !phase || !note.trim()}
+        title={!note.trim() ? "Rejection requires a note" : undefined}
+        onClick={() => void decide("reject")}
+      >
+        {busy === "reject" ? "Rejecting…" : "Reject"}
+      </button>
+      {error && <span className="gate-bar__error">{error}</span>}
+    </div>
+  );
+}
+
 function RunDetail({
   run,
   agents,
   now,
   transcript,
   loading,
+  repoPath,
+  onGateDecided,
 }: {
   run: WorkflowRunSummary;
   agents: string[];
   now: number;
   transcript: NormalizedEvent[];
   loading: boolean;
+  repoPath: string;
+  onGateDecided: () => void;
 }) {
   const dur =
     run.startedTs && run.endedTs
@@ -222,6 +314,9 @@ function RunDetail({
         )}
         <code className="rundetail__runid">{run.wfUuid}</code>
       </div>
+      {run.status === "paused" && repoPath && (
+        <PhaseGateBar run={run} repoPath={repoPath} onDecided={onGateDecided} />
+      )}
       {loading ? (
         <p style={{ color: "var(--text-muted)", fontSize: 12, paddingTop: 12 }}>
           Loading transcript…
@@ -492,6 +587,8 @@ export function JournalView({ project }: { project: Project }) {
             now={now}
             transcript={mergedTranscript}
             loading={loadingTranscript}
+            repoPath={project.repo_path?.trim() ?? ""}
+            onGateDecided={() => void loadRuns()}
           />
         ) : (
           <div className="journal-empty">
