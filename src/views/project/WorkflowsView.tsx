@@ -21,6 +21,7 @@ import type { Project } from "../../types/contracts";
 import { AgentFace, type AgentState } from "../../components/AgentFace";
 import { useProjectAgentLiveStates } from "../../state/projectEvents";
 import { localAgentCreate, emptyAgentUpdate } from "../../api/agent_edit";
+import { chatProviders, type ProviderOption } from "../../api/chat";
 
 const SLUG_RE = /^[a-z0-9][a-z0-9_-]*$/;
 const PROVIDER_TOOLS = ["claude", "codex", "gemini", "opencode"];
@@ -42,12 +43,21 @@ function AgentMiniComposer({
 }) {
   const [id, setId] = useState("");
   const [tool, setTool] = useState("claude");
+  const [model, setModel] = useState("");
   const [role, setRole] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [pickedSkills, setPickedSkills] = useState<string[]>([]);
   const [pickedMcp, setPickedMcp] = useState<string[]>([]);
+  const [providers, setProviders] = useState<ProviderOption[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    chatProviders()
+      .then(setProviders)
+      .catch(() => {});
+  }, []);
+  const modelOptions = providers.find((p) => p.tool === tool)?.models ?? [];
 
   const toggle = (arr: string[], v: string) =>
     arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v];
@@ -66,6 +76,7 @@ function AgentMiniComposer({
         aid,
         emptyAgentUpdate({
           tool,
+          model: model.trim() || null,
           role: role.trim() || null,
           systemPrompt: systemPrompt.trim() || null,
           skills: pickedSkills,
@@ -94,7 +105,10 @@ function AgentMiniComposer({
         <select
           className="wf-input"
           value={tool}
-          onChange={(e) => setTool(e.target.value)}
+          onChange={(e) => {
+            setTool(e.target.value);
+            setModel("");
+          }}
         >
           {PROVIDER_TOOLS.map((t) => (
             <option key={t} value={t}>
@@ -102,6 +116,20 @@ function AgentMiniComposer({
             </option>
           ))}
         </select>
+      </div>
+      <div className="wf-compose__row">
+        <input
+          className="wf-input"
+          placeholder="model (provider default)"
+          list="wf-model-options"
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+        />
+        <datalist id="wf-model-options">
+          {modelOptions.map((m) => (
+            <option key={m} value={m} />
+          ))}
+        </datalist>
         <input
           className="wf-input"
           placeholder="role (optional)"
