@@ -1795,6 +1795,11 @@ code {
   flex-shrink: 0;
 }
 
+/* Sidebar collapsed → header sits at x=0; clear the macOS traffic lights. */
+.bridge__header--inset {
+  padding-left: 82px;
+}
+
 .bridge__header-sep {
   width: var(--hairline);
   height: 18px;
@@ -7778,6 +7783,33 @@ textarea:focus-visible,
 .badge--running .badge__dot {
   box-shadow: 0 0 8px rgba(217, 119, 87, 0.55);
 }
+
+/* Sidebar drag-to-resize handle — pinned to the right edge of the fixed
+   sidebar box; copper hairline on hover/drag. */
+.sidebar-resizer {
+  position: absolute;
+  inset-block: 0;
+  right: -3px;
+  width: 6px;
+  z-index: 30;
+  cursor: col-resize;
+}
+.sidebar-resizer::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+  transition: background var(--motion-fast) var(--ease-out);
+}
+.sidebar-resizer:hover::after,
+body[data-sidebar-resizing] .sidebar-resizer::after {
+  background: var(--copper);
+}
+/* Crisp dragging — suppress the sidebar's width/left transitions mid-resize. */
+body[data-sidebar-resizing] { cursor: col-resize; user-select: none; }
+body[data-sidebar-resizing] * { transition-duration: 0s !important; }
 
 /* Sidebar active item — copper inset rail (the rationed "you are here" signal),
    over a subtle surface tint. Copper appears nowhere else in the nav row. */

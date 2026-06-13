@@ -9,7 +9,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarRail,
+  useSidebar,
 } from "./ui/sidebar";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useProjectsStore } from "../state/projects";
@@ -33,7 +33,61 @@ import {
   Pencil,
   Trash2,
   Search,
+  PanelLeftClose,
 } from "lucide-react";
+
+/** Drag-to-resize handle pinned to the sidebar's right edge. shadcn's
+ *  SidebarRail only toggles; this sets `--sidebar-width` on the provider
+ *  wrapper live during drag (transitions suppressed) and persists on release. */
+function SidebarResizer() {
+  const MIN = 240;
+  const MAX = 460;
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const wrapper = (e.currentTarget as HTMLElement).closest(
+      '[class*="sidebar-wrapper"]',
+    ) as HTMLElement | null;
+    document.body.setAttribute("data-sidebar-resizing", "");
+    const clamp = (x: number) => Math.min(MAX, Math.max(MIN, Math.round(x)));
+    const move = (ev: PointerEvent) => {
+      wrapper?.style.setProperty("--sidebar-width", `${clamp(ev.clientX)}px`);
+    };
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.removeAttribute("data-sidebar-resizing");
+      const w = `${clamp(ev.clientX)}px`;
+      try {
+        localStorage.setItem("animus.sidebarWidth", w);
+      } catch {
+        /* non-fatal */
+      }
+      window.dispatchEvent(new CustomEvent("animus-sidebar-width", { detail: w }));
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  return (
+    <div
+      role="separator"
+      aria-label="Resize sidebar"
+      aria-orientation="vertical"
+      onPointerDown={onPointerDown}
+      onDoubleClick={() => {
+        try {
+          localStorage.removeItem("animus.sidebarWidth");
+        } catch {
+          /* non-fatal */
+        }
+        window.dispatchEvent(
+          new CustomEvent("animus-sidebar-width", { detail: "17rem" }),
+        );
+      }}
+      title="Drag to resize · double-click to reset"
+      className="sidebar-resizer"
+    />
+  );
+}
 
 function dotToneFor(status: CycleStatus | undefined): "ok" | "warn" | "off" {
   if (status === "passed") return "ok";
@@ -202,6 +256,7 @@ export function ProjectsRail({
   const activeId = useActiveProject((s) => s.activeProjectId);
   const setActive = useActiveProject((s) => s.setActiveProject);
   const openConversation = useActiveProject((s) => s.openConversation);
+  const { toggleSidebar } = useSidebar();
 
   const [conversations, setConversations] = useState<ProjectConversation[]>([]);
   const [convFilter, setConvFilter] = useState("");
@@ -313,23 +368,34 @@ export function ProjectsRail({
 
   return (
     <Sidebar variant="sidebar" collapsible="offcanvas">
-      <SidebarHeader className="flex-col gap-2 px-3 pt-2">
-        <div className="flex items-center gap-2 h-7">
-          <span
-            aria-hidden
-            className="inline-block size-2 rounded-full bg-[var(--accent)] shrink-0"
-          />
-          <span className="text-[13px] font-semibold tracking-tight text-sidebar-foreground group-data-[collapsible=icon]:hidden">
-            Animus
-          </span>
+      <SidebarHeader className="flex-col gap-2.5 px-3 pt-3 pb-1.5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span
+              aria-hidden
+              className="inline-block size-[9px] rounded-full bg-[var(--copper)] shrink-0 shadow-[0_0_8px_rgba(217,119,87,0.55)]"
+            />
+            <span className="font-[var(--font-display)] text-[15px] font-semibold tracking-[-0.02em] text-sidebar-foreground">
+              Animus
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            aria-label="Collapse sidebar"
+            title="Collapse sidebar (⌘B)"
+            className="flex items-center justify-center size-6 rounded-md text-sidebar-foreground/45 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+          >
+            <PanelLeftClose className="size-4" />
+          </button>
         </div>
         <button
           type="button"
           onClick={onAddProject}
           disabled={addProjectBusy}
-          className="flex items-center justify-center gap-1.5 h-7 rounded-full text-[12px] font-medium bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] disabled:opacity-60 transition-colors"
+          className="flex items-center justify-center gap-1.5 h-8 rounded-full text-[12.5px] font-medium bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] disabled:opacity-60 transition-[background,transform] active:scale-[0.985]"
         >
-          <Plus className="size-3.5" />
+          <Plus className="size-4" />
           <span>{addProjectBusy ? "Choosing folder…" : "Add project"}</span>
         </button>
       </SidebarHeader>
@@ -525,7 +591,7 @@ export function ProjectsRail({
         </span>
       </SidebarFooter>
 
-      <SidebarRail />
+      <SidebarResizer />
     </Sidebar>
   );
 }

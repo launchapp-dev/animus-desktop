@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import { SidebarTrigger } from "./ui/sidebar";
+import { SidebarTrigger, useSidebar } from "./ui/sidebar";
 import { useProjectsStore } from "../state/projects";
 import { useActiveProject, type BridgeMode } from "../state/activeProject";
 import { useDaemonStore } from "../state/daemon";
@@ -63,9 +63,14 @@ function BridgeFrame({
   bodyFill?: boolean;
 }) {
   const daemon = useDaemonStore((s) => s.status);
+  // When the sidebar is collapsed (offcanvas) the header slides to x=0 and
+  // would sit under the macOS traffic lights — reserve left clearance for them.
+  const { state: sidebarState } = useSidebar();
   return (
     <main className="bridge">
-      <header className="bridge__header">
+      <header
+        className={`bridge__header ${sidebarState === "collapsed" ? "bridge__header--inset" : ""}`}
+      >
         <SidebarTrigger className="size-7 -ml-1" />
         <span className="bridge__header-sep" />
         <h1 className="bridge__title">

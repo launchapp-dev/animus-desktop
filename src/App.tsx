@@ -37,6 +37,22 @@ function AppShell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const commandOpen = useActiveProject((s) => s.commandOpen);
   const toggleCommand = useActiveProject((s) => s.toggleCommand);
+  // Sidebar width is user-resizable (drag handle in ProjectsRail) and persisted.
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    try {
+      return localStorage.getItem("animus.sidebarWidth") || "17rem";
+    } catch {
+      return "17rem";
+    }
+  });
+  useEffect(() => {
+    const onResize = (e: Event) => {
+      const w = (e as CustomEvent<string>).detail;
+      if (typeof w === "string") setSidebarWidth(w);
+    };
+    window.addEventListener("animus-sidebar-width", onResize);
+    return () => window.removeEventListener("animus-sidebar-width", onResize);
+  }, []);
   const activeProjectId = useActiveProject((s) => s.activeProjectId);
   const projects = useProjectsStore((s) => s.projects);
   const location = useLocation();
@@ -159,7 +175,7 @@ function AppShell() {
       <SidebarProvider
         style={
           {
-            "--sidebar-width": "15rem",
+            "--sidebar-width": sidebarWidth,
           } as React.CSSProperties
         }
       >
