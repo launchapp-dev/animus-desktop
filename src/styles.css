@@ -7462,6 +7462,17 @@ textarea.wf-input { font-family: var(--font-mono); font-size: 11.5px; resize: ve
 }
 .wf-compose__actions { display: flex; gap: 8px; }
 .wf-compose__err { font-size: 11.5px; color: var(--crimson); }
+.wf-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.wf-chip {
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  border: var(--hairline) solid var(--border);
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  transition: background var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out), border-color var(--motion-fast) var(--ease-out);
+}
+.wf-chip--on { color: var(--copper); border-color: var(--copper); background: var(--copper-bg-soft); }
 
 /* Phase gate bar (paused runs in Journal) */
 .gate-bar {

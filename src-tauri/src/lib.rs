@@ -180,6 +180,7 @@ pub fn run() {
             workflow_yaml::local_mcp_server_upsert,
             workflow_yaml::local_mcp_link,
             agent_edit::local_agent_update,
+            agent_edit::local_agent_create,
             event_log::local_events_read,
             event_log::local_workflow_runs,
             event_log::local_run_transcript,

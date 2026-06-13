@@ -63,3 +63,55 @@ export function localAgentUpdate(
     update,
   });
 }
+
+/** Create a project-local agent in `.animus/workflows.yaml` (created if absent). */
+export function localAgentCreate(
+  repoPath: string,
+  agentId: string,
+  update: AgentUpdate,
+): Promise<AgentUpdateResult> {
+  return invoke<AgentUpdateResult>("local_agent_create", {
+    repoPath,
+    agentId,
+    update,
+  });
+}
+
+/** A fully-defaulted AgentUpdate; override only the fields you care about. */
+export function emptyAgentUpdate(partial?: Partial<AgentUpdate>): AgentUpdate {
+  return {
+    model: null,
+    tool: null,
+    systemPrompt: null,
+    systemPromptFile: null,
+    description: null,
+    role: null,
+    persona: { style: null, instructions: null, traits: [] },
+    models: [],
+    skills: [],
+    fallbackModels: [],
+    fallbackTools: [],
+    extraArgs: [],
+    codexConfigOverrides: [],
+    mcpServers: [],
+    memoryEnabled: null,
+    memoryWritePolicy: null,
+    memoryScope: null,
+    memoryMaxContextChars: null,
+    communicationEnabled: null,
+    communicationChannels: [],
+    communicationCanMessage: [],
+    communicationMaxContextChars: null,
+    networkAccess: null,
+    webSearch: null,
+    reasoningEffort: null,
+    maxAttempts: null,
+    maxContinuations: null,
+    timeoutSecs: null,
+    toolProfile: null,
+    toolAllow: [],
+    toolDeny: [],
+    capabilities: [],
+    ...partial,
+  };
+}

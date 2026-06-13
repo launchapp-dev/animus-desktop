@@ -20,25 +20,180 @@ import {
 import type { Project } from "../../types/contracts";
 import { AgentFace, type AgentState } from "../../components/AgentFace";
 import { useProjectAgentLiveStates } from "../../state/projectEvents";
+import { localAgentCreate, emptyAgentUpdate } from "../../api/agent_edit";
 
 const SLUG_RE = /^[a-z0-9][a-z0-9_-]*$/;
+const PROVIDER_TOOLS = ["claude", "codex", "gemini", "opencode"];
+
+/** Inline "new agent" form — writes a project-local agent profile so a phase
+ *  can reference it. Optionally wires skills + MCP servers it should use. */
+function AgentMiniComposer({
+  repoPath,
+  skills,
+  mcpServers,
+  onSaved,
+  onCancel,
+}: {
+  repoPath: string;
+  skills: string[];
+  mcpServers: string[];
+  onSaved: (agentId: string) => void;
+  onCancel: () => void;
+}) {
+  const [id, setId] = useState("");
+  const [tool, setTool] = useState("claude");
+  const [role, setRole] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [pickedSkills, setPickedSkills] = useState<string[]>([]);
+  const [pickedMcp, setPickedMcp] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const toggle = (arr: string[], v: string) =>
+    arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v];
+
+  const save = async () => {
+    const aid = id.trim();
+    if (!SLUG_RE.test(aid)) {
+      setError("Agent id must be lowercase letters, digits, '-' or '_'.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await localAgentCreate(
+        repoPath,
+        aid,
+        emptyAgentUpdate({
+          tool,
+          role: role.trim() || null,
+          systemPrompt: systemPrompt.trim() || null,
+          skills: pickedSkills,
+          mcpServers: pickedMcp,
+        }),
+      );
+      if (res.written) onSaved(aid);
+      else setError("agent was not written");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="wf-compose__phase">
+      <div className="wf-compose__label">New agent</div>
+      <div className="wf-compose__row">
+        <input
+          className="wf-input"
+          placeholder="agent-id"
+          value={id}
+          onChange={(e) => setId(e.target.value)}
+        />
+        <select
+          className="wf-input"
+          value={tool}
+          onChange={(e) => setTool(e.target.value)}
+        >
+          {PROVIDER_TOOLS.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+        <input
+          className="wf-input"
+          placeholder="role (optional)"
+          value={role}
+          onChange={(e) => setRole(e.target.value)}
+        />
+      </div>
+      <label className="wf-field">
+        <span>System prompt</span>
+        <textarea
+          className="wf-input"
+          rows={3}
+          placeholder="Who is this agent and how should it behave?"
+          value={systemPrompt}
+          onChange={(e) => setSystemPrompt(e.target.value)}
+        />
+      </label>
+      {skills.length > 0 && (
+        <div className="wf-field">
+          <span>Skills</span>
+          <div className="wf-chips">
+            {skills.slice(0, 24).map((s) => (
+              <button
+                key={s}
+                type="button"
+                className={`wf-chip ${pickedSkills.includes(s) ? "wf-chip--on" : ""}`}
+                onClick={() => setPickedSkills((p) => toggle(p, s))}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {mcpServers.length > 0 && (
+        <div className="wf-field">
+          <span>MCP servers</span>
+          <div className="wf-chips">
+            {mcpServers.map((s) => (
+              <button
+                key={s}
+                type="button"
+                className={`wf-chip ${pickedMcp.includes(s) ? "wf-chip--on" : ""}`}
+                onClick={() => setPickedMcp((p) => toggle(p, s))}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {error && <div className="wf-compose__err">{error}</div>}
+      <div className="wf-compose__actions">
+        <button
+          type="button"
+          className="workflow-row__run"
+          disabled={busy || !SLUG_RE.test(id.trim())}
+          onClick={() => void save()}
+        >
+          {busy ? "Creating…" : "Create agent"}
+        </button>
+        <button type="button" className="plugins-pane__ghost" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
 
 /** Compose a phase (agent or command) and upsert it to the generated overlay.
  *  Returns the new phase id to the caller so the workflow composer can chain. */
 function PhaseComposer({
   repoPath,
   agents,
+  skills,
+  mcpServers,
+  onAgentCreated,
   onSaved,
   onCancel,
 }: {
   repoPath: string;
   agents: { id: string }[];
+  skills: string[];
+  mcpServers: string[];
+  onAgentCreated: () => void;
   onSaved: (phaseId: string) => void;
   onCancel: () => void;
 }) {
   const [id, setId] = useState("");
   const [mode, setMode] = useState<"agent" | "command">("agent");
-  const [agentId, setAgentId] = useState(agents[0]?.id ?? "swe");
+  const [agentId, setAgentId] = useState(agents[0]?.id ?? "");
+  const [newAgent, setNewAgent] = useState(agents.length === 0);
   const [directive, setDirective] = useState("");
   const [gate, setGate] = useState(false);
   const [program, setProgram] = useState("");
@@ -125,20 +280,43 @@ function PhaseComposer({
       </div>
       {mode === "agent" ? (
         <>
-          <label className="wf-field">
-            <span>Agent</span>
-            <select
-              className="wf-input"
-              value={agentId}
-              onChange={(e) => setAgentId(e.target.value)}
-            >
-              {agents.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.id}
-                </option>
-              ))}
-            </select>
-          </label>
+          {newAgent ? (
+            <AgentMiniComposer
+              repoPath={repoPath}
+              skills={skills}
+              mcpServers={mcpServers}
+              onSaved={(aid) => {
+                setAgentId(aid);
+                setNewAgent(false);
+                onAgentCreated();
+              }}
+              onCancel={() => setNewAgent(agents.length === 0)}
+            />
+          ) : (
+            <div className="wf-field">
+              <span>Agent</span>
+              <div className="wf-compose__add">
+                <select
+                  className="wf-input"
+                  value={agentId}
+                  onChange={(e) => setAgentId(e.target.value)}
+                >
+                  {agents.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.id}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="plugins-pane__ghost"
+                  onClick={() => setNewAgent(true)}
+                >
+                  + New agent
+                </button>
+              </div>
+            </div>
+          )}
           <label className="wf-field">
             <span>Directive</span>
             <textarea
@@ -179,7 +357,12 @@ function PhaseComposer({
         <button
           type="button"
           className="workflow-row__run"
-          disabled={busy || !SLUG_RE.test(id.trim())}
+          disabled={
+            busy ||
+            !SLUG_RE.test(id.trim()) ||
+            (mode === "agent" && !agentId) ||
+            (mode === "command" && !program.trim())
+          }
           onClick={() => void save()}
         >
           {busy ? "Saving…" : "Save phase"}
@@ -197,6 +380,8 @@ function WorkflowComposer({
   repoPath,
   availablePhases,
   agents,
+  skills,
+  mcpServers,
   onSaved,
   onRefresh,
   onCancel,
@@ -204,6 +389,8 @@ function WorkflowComposer({
   repoPath: string;
   availablePhases: string[];
   agents: { id: string }[];
+  skills: string[];
+  mcpServers: string[];
   onSaved: () => void;
   onRefresh: () => void;
   onCancel: () => void;
@@ -326,6 +513,9 @@ function WorkflowComposer({
           <PhaseComposer
             repoPath={repoPath}
             agents={agents}
+            skills={skills}
+            mcpServers={mcpServers}
+            onAgentCreated={onRefresh}
             onSaved={(pid) => {
               addPhase(pid);
               setNewPhase(false);
@@ -1187,6 +1377,10 @@ export function WorkflowsView({ project }: { project: Project }) {
           repoPath={project.repo_path?.trim() ?? ""}
           availablePhases={report.phases.map((p) => p.id)}
           agents={report.agents.map((a) => ({ id: a.id }))}
+          skills={Array.from(
+            new Set(report.agents.flatMap((a) => a.skills ?? [])),
+          ).sort()}
+          mcpServers={report.mcpServers.map((m) => m.id)}
           onSaved={() => {
             setComposing(false);
             void refresh();

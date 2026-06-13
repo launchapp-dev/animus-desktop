@@ -71,14 +71,57 @@ pub async fn local_agent_update(
     agent_id: String,
     update: AgentUpdate,
 ) -> Result<AgentUpdateResult, String> {
-    let path = PathBuf::from(source_file.trim());
-    crate::workflow_yaml::validate_animus_yaml_path(&path)?;
-    if !path.is_file() {
-        return Err(format!("{} is not a file", path.display()));
+    write_agent(PathBuf::from(source_file.trim()), agent_id, update, false).await
+}
+
+fn valid_agent_id(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+}
+
+/// Create (or update) a project-local agent profile in `.animus/workflows.yaml`,
+/// creating that file with an `agents:` block if it doesn't exist yet. This is
+/// the path used when authoring an agent from scratch (e.g. for a new phase).
+#[tauri::command]
+pub async fn local_agent_create(
+    repo_path: String,
+    agent_id: String,
+    update: AgentUpdate,
+) -> Result<AgentUpdateResult, String> {
+    let id = agent_id.trim().to_string();
+    if !valid_agent_id(&id) {
+        return Err("invalid agent id: use lowercase letters, digits, '-', '_'".to_string());
     }
-    let content = tokio::fs::read_to_string(&path)
-        .await
-        .map_err(|e| format!("read {}: {}", path.display(), e))?;
+    let repo = PathBuf::from(repo_path.trim());
+    if !repo.is_dir() {
+        return Err(format!("project path not found: {}", repo.display()));
+    }
+    let path = repo.join(".animus").join("workflows.yaml");
+    write_agent(path, id, update, true).await
+}
+
+async fn write_agent(
+    path: PathBuf,
+    agent_id: String,
+    update: AgentUpdate,
+    create_if_missing: bool,
+) -> Result<AgentUpdateResult, String> {
+    crate::workflow_yaml::validate_animus_yaml_path(&path)?;
+    let content = if path.is_file() {
+        tokio::fs::read_to_string(&path)
+            .await
+            .map_err(|e| format!("read {}: {}", path.display(), e))?
+    } else if create_if_missing {
+        if let Some(dir) = path.parent() {
+            tokio::fs::create_dir_all(dir)
+                .await
+                .map_err(|e| format!("create {}: {}", dir.display(), e))?;
+        }
+        "agents: {}\n".to_string()
+    } else {
+        return Err(format!("{} is not a file", path.display()));
+    };
 
     let mut doc: Yaml = serde_yaml::from_str(&content)
         .map_err(|e| format!("parse {}: {}", path.display(), e))?;
