@@ -319,20 +319,10 @@ export function ProjectsRail({
           type="button"
           onClick={onAddProject}
           disabled={addProjectBusy}
-          className="group-data-[collapsible=icon]:hidden flex items-center justify-center gap-1.5 h-7 rounded-md text-[12px] font-medium bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] disabled:opacity-60 transition-colors"
+          className="flex items-center justify-center gap-1.5 h-7 rounded-full text-[12px] font-medium bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] disabled:opacity-60 transition-colors"
         >
           <Plus className="size-3.5" />
           <span>{addProjectBusy ? "Choosing folder…" : "Add project"}</span>
-        </button>
-        <button
-          type="button"
-          onClick={onAddProject}
-          disabled={addProjectBusy}
-          aria-label="Add project"
-          title="Add project"
-          className="hidden group-data-[collapsible=icon]:flex items-center justify-center size-7 rounded-md bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] disabled:opacity-60 transition-colors"
-        >
-          <Plus className="size-3.5" />
         </button>
       </SidebarHeader>
 
@@ -490,26 +480,24 @@ export function ProjectsRail({
           </SidebarGroupContent>
         </SidebarGroup>
 
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={activeId === "plugins"}
-                  onClick={() => setActive("plugins")}
-                  tooltip="Settings"
-                >
-                  <Settings2 />
-                  <span>Settings</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="text-[11px] text-sidebar-foreground/60 px-3 pb-3 group-data-[collapsible=icon]:hidden">
-        ⌘B to collapse
+      <SidebarFooter className="gap-1 border-t border-[var(--border)] px-2 py-2">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              isActive={activeId === "plugins"}
+              onClick={() => setActive("plugins")}
+              tooltip="Settings"
+            >
+              <Settings2 />
+              <span>Settings</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+        <span className="px-2 font-mono text-[10px] text-sidebar-foreground/40">
+          ⌘B to hide
+        </span>
       </SidebarFooter>
 
       <SidebarRail />
