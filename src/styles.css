@@ -176,7 +176,7 @@
   color-scheme: light;
   /* Inverse of the dark Instrument ladder: near-white canvas, white card lifts,
    * off-black ink, copper still the single signal, near-black pill CTA. */
-  --slate: #15161a;
+  --slate: #edeae4;
   --copper: #c0593a;
   --copper-hover: #a84a2e;
   --copper-bg: rgba(192, 89, 58, 0.12);
@@ -186,6 +186,15 @@
   --brass: #7a5c00;
   --crimson: #b33426;
   --bone: #15161a;
+
+  /* Code/log surfaces flip to a light panel in light mode (dark text inherits
+   * via --text), and syntax tokens darken so they stay legible on light. */
+  --bg-deep: #eceae4;
+  --hl-keyword: #8250df;
+  --hl-string: #0a7d2c;
+  --hl-number: #9a6700;
+  --hl-function: #1f6feb;
+  --hl-attr: #b3502e;
 
   /* Surface ladder (light): faint-gray canvas, white lifts. Elevation reads via
    * white + hairline/shadow — the inverse of dark's lighter-on-darker. */

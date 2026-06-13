@@ -326,7 +326,7 @@ function RunDetail({
           No transcript recorded for this run.
         </p>
       ) : (
-        <Transcript events={transcript} />
+        <Transcript events={transcript} live={run.status === "running"} />
       )}
     </div>
   );

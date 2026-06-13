@@ -220,18 +220,21 @@ function MessageBubble({ evt, label }: { evt: NormalizedEvent; label: string }) 
   );
 }
 
-function ThinkingLine({ evt }: { evt: NormalizedEvent }) {
+function ThinkingLine({ evt, active }: { evt: NormalizedEvent; active?: boolean }) {
   return (
     <div className="tr-row tr-row--aux">
       <div className="tr-row__gutter">
-        <span className="tr-thinking-dots" aria-hidden>
+        <span
+          className={`tr-thinking-dots ${active ? "" : "tr-thinking-dots--static"}`}
+          aria-hidden
+        >
           <span />
           <span />
           <span />
         </span>
       </div>
       <div className="tr-row__main">
-        <span className="tr-aux-label">thinking…</span>
+        <span className="tr-aux-label">{active ? "thinking…" : "thought"}</span>
         <span className="tr-row__time">{clockTime(evt.ts)}</span>
       </div>
     </div>
@@ -457,7 +460,13 @@ function GenericLine({ evt }: { evt: NormalizedEvent }) {
   );
 }
 
-export function TranscriptRow({ evt }: { evt: NormalizedEvent }) {
+export function TranscriptRow({
+  evt,
+  active,
+}: {
+  evt: NormalizedEvent;
+  active?: boolean;
+}) {
   if (evt.error && evt.cat !== "llm.tool_result") return <ErrorLine evt={evt} />;
   switch (evt.cat) {
     case "workflow.start":
@@ -476,7 +485,7 @@ export function TranscriptRow({ evt }: { evt: NormalizedEvent }) {
     case "plugin.cancel":
       return <DispatchLine evt={evt} />;
     case "llm.thinking":
-      return <ThinkingLine evt={evt} />;
+      return <ThinkingLine evt={evt} active={active} />;
     case "llm.tool_call":
       return <ToolCallLine evt={evt} />;
     case "llm.tool_result":
@@ -490,11 +499,24 @@ export function TranscriptRow({ evt }: { evt: NormalizedEvent }) {
   }
 }
 
-export function Transcript({ events }: { events: NormalizedEvent[] }) {
+export function Transcript({
+  events,
+  live,
+}: {
+  events: NormalizedEvent[];
+  live?: boolean;
+}) {
+  // Animate the thinking indicator only for a live run's trailing event —
+  // historical/completed transcripts render static "thought" dots.
+  const lastIdx = events.length - 1;
   return (
     <div className="tr">
       {events.map((e, i) => (
-        <TranscriptRow key={`${e.tsRaw ?? e.ts}-${e.cat}-${i}`} evt={e} />
+        <TranscriptRow
+          key={`${e.tsRaw ?? e.ts}-${e.cat}-${i}`}
+          evt={e}
+          active={!!live && i === lastIdx}
+        />
       ))}
     </div>
   );
