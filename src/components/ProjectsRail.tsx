@@ -21,7 +21,6 @@ import {
   type ProjectConversation,
 } from "../api/chat";
 import { relativeTime, conversationMatches, nextNavIndex } from "../lib/utils";
-import { ProviderLogo } from "./ProviderLogo";
 import { useConversationStreaming } from "../views/project/ChatView";
 import type { CycleStatus } from "../types/contracts";
 import {
@@ -29,6 +28,7 @@ import {
   Boxes,
   Settings2,
   FolderGit2,
+  MessageSquare,
   MessageSquarePlus,
   Pencil,
   Trash2,
@@ -99,7 +99,7 @@ function ConversationRow({
     return (
       <SidebarMenuItem>
         <div className="flex items-center gap-1.5 px-2 py-1">
-          <ProviderLogo tool={c.tool} size={13} className="shrink-0" />
+          <MessageSquare className="size-3 shrink-0 text-sidebar-foreground/40" />
           <input
             autoFocus
             value={draft}
@@ -124,7 +124,7 @@ function ConversationRow({
         tooltip={c.title ?? "Untitled chat"}
         className="cx-conv-nav h-auto py-1 items-center pr-12"
       >
-        <ProviderLogo tool={c.tool} size={13} className="shrink-0" />
+        <MessageSquare className="size-3 shrink-0 text-sidebar-foreground/40" />
         <span className="truncate text-[12px] leading-tight text-sidebar-foreground/85">
           {c.title ?? "Untitled chat"}
         </span>
@@ -205,7 +205,15 @@ export function ProjectsRail({
 
   const [conversations, setConversations] = useState<ProjectConversation[]>([]);
   const [convFilter, setConvFilter] = useState("");
+  const [expandedConvs, setExpandedConvs] = useState<Set<string>>(new Set());
   const convSearchRef = useRef<HTMLInputElement | null>(null);
+  const toggleConvGroup = (id: string) =>
+    setExpandedConvs((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   // ↑/↓ move focus through the conversation rows; ↓ from the search box enters
   // the list, ↑ from the first row returns to it. Enter opens (native button).
@@ -281,9 +289,9 @@ export function ProjectsRail({
     openConversation(realActive, "new");
   };
 
-  // Group conversations under their project. `conversations` arrives globally
-  // sorted newest-first, so iterating preserves that order inside each group and
-  // orders the groups themselves by most-recent activity.
+  // Conversations grouped under their project, newest-first. Each group shows
+  // the most-recent few with an expand-to-see-all toggle, so the rail stays
+  // short without losing the cross-project view.
   const convGroups = (() => {
     const order: string[] = [];
     const byProject = new Map<
@@ -376,7 +384,7 @@ export function ProjectsRail({
           </SidebarGroupContent>
         </SidebarGroup>
 
-        <SidebarGroup className="group-data-[collapsible=icon]:hidden">
+        <SidebarGroup>
           <SidebarGroupLabel className="flex items-center justify-between text-[10px] uppercase tracking-wider">
             <span>Conversations</span>
             <button
@@ -385,7 +393,7 @@ export function ProjectsRail({
               disabled={projects.length === 0}
               aria-label="New conversation"
               title="New conversation"
-              className="flex items-center justify-center size-4 rounded text-sidebar-foreground/60 hover:text-[var(--accent)] disabled:opacity-40 transition-colors"
+              className="flex items-center justify-center size-4 rounded text-sidebar-foreground/50 hover:text-[var(--copper)] disabled:opacity-40 transition-colors"
             >
               <MessageSquarePlus className="size-3.5" />
             </button>
@@ -399,9 +407,9 @@ export function ProjectsRail({
                     ref={convSearchRef}
                     value={convFilter}
                     onChange={(e) => setConvFilter(e.target.value)}
-                    placeholder="Search conversations…"
+                    placeholder="Search chats…"
                     aria-label="Search conversations"
-                    className="h-6 w-full rounded border border-transparent bg-sidebar-accent/40 pl-6 pr-2 text-[11px] text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/35 focus:border-[var(--accent)]"
+                    className="h-6 w-full rounded border border-transparent bg-sidebar-accent/50 pl-6 pr-2 text-[11px] text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/35 focus:border-[var(--copper)]"
                   />
                 </div>
               </div>
@@ -425,37 +433,54 @@ export function ProjectsRail({
                 No matches
               </div>
             ) : (
-              convGroups.map((g) => (
-                <div key={g.projectId} className="mb-1.5">
-                  <div className="flex items-center justify-between gap-1 px-2 h-5">
-                    <span className="truncate text-[10px] font-medium uppercase tracking-wide text-sidebar-foreground/40">
-                      {g.name}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => openConversation(g.projectId, "new")}
-                      aria-label={`New conversation in ${g.name}`}
-                      title={`New conversation in ${g.name}`}
-                      className="flex items-center justify-center size-4 rounded text-sidebar-foreground/40 hover:text-[var(--accent)] transition-colors shrink-0"
-                    >
-                      <MessageSquarePlus className="size-3" />
-                    </button>
+              convGroups.map((g) => {
+                const expanded = expandedConvs.has(g.projectId);
+                const COLLAPSED = 2;
+                const shown = expanded ? g.items : g.items.slice(0, COLLAPSED);
+                const repoPath = projects.find(
+                  (p) => p.id === g.projectId,
+                )?.repo_path;
+                return (
+                  <div key={g.projectId} className="mb-1.5">
+                    <div className="flex items-center justify-between gap-1 px-2 h-5">
+                      <span className="truncate text-[10px] font-medium uppercase tracking-wide text-sidebar-foreground/40">
+                        {g.name}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => openConversation(g.projectId, "new")}
+                        aria-label={`New conversation in ${g.name}`}
+                        title={`New conversation in ${g.name}`}
+                        className="flex items-center justify-center size-4 rounded text-sidebar-foreground/40 hover:text-[var(--copper)] transition-colors shrink-0"
+                      >
+                        <MessageSquarePlus className="size-3" />
+                      </button>
+                    </div>
+                    <SidebarMenu>
+                      {shown.map((c) => (
+                        <ConversationRow
+                          key={c.id}
+                          c={c}
+                          repoPath={repoPath}
+                          onOpen={() => openConversation(c.projectId, c.id)}
+                          onChanged={refreshConversations}
+                        />
+                      ))}
+                    </SidebarMenu>
+                    {g.items.length > COLLAPSED && (
+                      <button
+                        type="button"
+                        onClick={() => toggleConvGroup(g.projectId)}
+                        className="ml-2 mt-0.5 text-[10px] text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-colors"
+                      >
+                        {expanded
+                          ? "Show less"
+                          : `Show all ${g.items.length}`}
+                      </button>
+                    )}
                   </div>
-                  <SidebarMenu>
-                    {g.items.map((c) => (
-                      <ConversationRow
-                        key={c.id}
-                        c={c}
-                        repoPath={
-                          projects.find((p) => p.id === c.projectId)?.repo_path
-                        }
-                        onOpen={() => openConversation(c.projectId, c.id)}
-                        onChanged={refreshConversations}
-                      />
-                    ))}
-                  </SidebarMenu>
-                </div>
-              ))
+                );
+              })
             )}
           </SidebarGroupContent>
         </SidebarGroup>
