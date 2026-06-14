@@ -16,6 +16,7 @@ import {
   animusWorkflowDefinitionUpsert,
   animusWorkflowPhaseGet,
   animusWorkflowPhaseUpsert,
+  animusWorkflowSetRework,
   type AnimusStatus,
 } from "../../api/animus";
 import type { Project } from "../../types/contracts";
@@ -192,6 +193,7 @@ function WorkflowCanvas({
   setPhases,
   phaseInfo,
   availablePhases,
+  reworkTargets,
   onInsert,
   onNewPhaseAt,
   onSelectPhase,
@@ -200,6 +202,7 @@ function WorkflowCanvas({
   setPhases: (next: string[]) => void;
   phaseInfo: PhaseInfo;
   availablePhases: string[];
+  reworkTargets: Record<string, string>;
   onInsert: (index: number, phaseId: string) => void;
   onNewPhaseAt: (index: number) => void;
   onSelectPhase: (id: string) => void;
@@ -247,24 +250,30 @@ function WorkflowCanvas({
 
   // Decision gates: a gated phase advances on "approve" (the solid spine edge)
   // and re-runs the previous phase on "reject" — drawn as a dashed loop-back.
-  const reworkEdges = phases.flatMap((p, i) =>
-    i > 0 && phaseInfo[p]?.gate
-      ? [
-          {
-            id: `rework:${p}`,
-            source: p,
-            target: phases[i - 1]!,
-            type: "default",
-            animated: true,
-            label: "rework",
-            style: { stroke: "var(--yellow)", strokeDasharray: "5 4" },
-            labelStyle: { fill: "var(--yellow)", fontSize: 10 },
-            labelBgStyle: { fill: "var(--bg-elevated)", fillOpacity: 0.9 },
-            markerEnd: { type: MarkerType.ArrowClosed, color: "var(--yellow)" },
-          },
-        ]
-      : [],
-  );
+  const reworkEdges = phases.flatMap((p, i) => {
+    const explicit = reworkTargets[p];
+    const target =
+      explicit && phases.includes(explicit)
+        ? explicit
+        : phaseInfo[p]?.gate && i > 0
+          ? phases[i - 1]!
+          : null;
+    if (!target || target === p) return [];
+    return [
+      {
+        id: `rework:${p}`,
+        source: p,
+        target,
+        type: "default",
+        animated: true,
+        label: "rework",
+        style: { stroke: "var(--yellow)", strokeDasharray: "5 4" },
+        labelStyle: { fill: "var(--yellow)", fontSize: 10 },
+        labelBgStyle: { fill: "var(--bg-elevated)", fillOpacity: 0.9 },
+        markerEnd: { type: MarkerType.ArrowClosed, color: "var(--yellow)" },
+      },
+    ];
+  });
   const allEdges = [...edges, ...reworkEdges];
 
   const unused = availablePhases.filter((p) => !phases.includes(p));
@@ -428,12 +437,18 @@ function PhaseConfigPanel({
   repoPath,
   phaseId,
   agents,
+  siblingPhases,
+  reworkTarget,
+  onReworkTarget,
   onClose,
   onSaved,
 }: {
   repoPath: string;
   phaseId: string;
   agents: { id: string }[];
+  siblingPhases?: string[];
+  reworkTarget?: string;
+  onReworkTarget?: (target: string) => void;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -595,6 +610,23 @@ function PhaseConfigPanel({
                 />
               </label>
             </>
+          )}
+          {gate && onReworkTarget && siblingPhases && (
+            <label className="wf-field">
+              <span>On reject, rework loops to</span>
+              <select
+                className="wf-input"
+                value={reworkTarget ?? ""}
+                onChange={(e) => onReworkTarget(e.target.value)}
+              >
+                <option value="">(default: previous phase)</option>
+                {siblingPhases.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </label>
           )}
           {error && <div className="wf-compose__err">{error}</div>}
           <div className="wf-compose__actions">
@@ -1022,6 +1054,8 @@ function WorkflowComposer({
   // When set, a freshly-authored phase is spliced in at this index (vs appended).
   const [pendingInsert, setPendingInsert] = useState<number | null>(null);
   const [selectedPhase, setSelectedPhase] = useState<string | null>(null);
+  // Per-phase rework target (workflow-step routing), applied on Create.
+  const [reworkTargets, setReworkTargets] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -1085,8 +1119,20 @@ function WorkflowComposer({
         phases,
         budget: null,
       });
-      if (res.ok) onSaved();
-      else
+      if (res.ok) {
+        // Apply per-phase rework routing (upsert can't carry inline on_verdict).
+        const targets = phases
+          .filter((p) => reworkTargets[p])
+          .map((p) => ({ phase: p, target: reworkTargets[p]!, maxAttempts: 3 }));
+        if (targets.length > 0) {
+          try {
+            await animusWorkflowSetRework(repoPath, wid, targets);
+          } catch {
+            /* non-fatal — workflow still created without routing */
+          }
+        }
+        onSaved();
+      } else
         setError(
           (res.error && typeof res.error === "object" && "message" in res.error
             ? String((res.error as { message: unknown }).message)
@@ -1200,6 +1246,7 @@ function WorkflowComposer({
             setPhases={setPhases}
             phaseInfo={phaseInfo}
             availablePhases={pickable}
+            reworkTargets={reworkTargets}
             onInsert={insertPhaseAt}
             onNewPhaseAt={(index) => {
               setPendingInsert(index);
@@ -1254,6 +1301,16 @@ function WorkflowComposer({
               repoPath={repoPath}
               phaseId={selectedPhase}
               agents={agents}
+              siblingPhases={phases.filter((p) => p !== selectedPhase)}
+              reworkTarget={reworkTargets[selectedPhase]}
+              onReworkTarget={(t) =>
+                setReworkTargets((prev) => {
+                  const next = { ...prev };
+                  if (t) next[selectedPhase] = t;
+                  else delete next[selectedPhase];
+                  return next;
+                })
+              }
               onClose={() => setSelectedPhase(null)}
               onSaved={() => {
                 setSelectedPhase(null);

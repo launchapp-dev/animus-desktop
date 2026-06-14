@@ -379,6 +379,23 @@ export function animusPhaseGate(args: {
   });
 }
 
+export interface ReworkTarget {
+  phase: string;
+  /** Target phase to loop back to on reject; null clears the rework route. */
+  target: string | null;
+  maxAttempts?: number | null;
+}
+
+/** Set per-phase rework routing on a project-created workflow (writes the inline
+ *  on_verdict config into the generated overlay; upsert can't carry it). */
+export function animusWorkflowSetRework(
+  path: string,
+  workflowId: string,
+  targets: ReworkTarget[],
+): Promise<void> {
+  return invoke<void>("animus_workflow_set_rework", { path, workflowId, targets });
+}
+
 /** Resume a paused / crash-recovered workflow run (respawns its runner). */
 export function animusWorkflowResume(
   path: string,
