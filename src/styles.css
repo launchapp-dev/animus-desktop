@@ -2488,6 +2488,15 @@ a {
   height: 6px !important;
   border: none !important;
 }
+/* Loop-back handles are utilitarian routing points — keep them nearly invisible
+   so the bottom of a phase node doesn't sprout visible dots. */
+.rf-handle--loop {
+  width: 5px !important;
+  height: 5px !important;
+  background: var(--border-strong) !important;
+  opacity: 0;
+}
+.react-flow__node:hover .rf-handle--loop { opacity: 0.6; }
 
 .rf-phase-node {
   background: var(--bg-elevated);

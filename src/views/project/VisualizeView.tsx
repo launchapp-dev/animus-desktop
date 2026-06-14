@@ -111,6 +111,22 @@ function PhaseNode({ data }: NodeProps) {
         {d.workflowRef && <span>↳ {d.workflowRef}</span>}
       </div>
       <Handle type="source" position={Position.Right} className="rf-handle" />
+      {/* Dedicated bottom handles so rework / back-branch edges bow BELOW the
+          spine instead of overlapping it. */}
+      <Handle
+        type="source"
+        id="loop-out"
+        position={Position.Bottom}
+        className="rf-handle rf-handle--loop"
+        style={{ left: "68%" }}
+      />
+      <Handle
+        type="target"
+        id="loop-in"
+        position={Position.Bottom}
+        className="rf-handle rf-handle--loop"
+        style={{ left: "32%" }}
+      />
     </div>
   );
 }
@@ -209,8 +225,10 @@ function buildGraph(
 
     let prev = wfNodeId;
     const phaseNodeByValue = new Map<string, string>();
+    const phaseIdxByValue = new Map<string, number>();
     const branchSpecs: {
       from: string;
+      fromIdx: number;
       verdict: string;
       target: string;
       max: number | null;
@@ -220,6 +238,8 @@ function buildGraph(
       const ps = phaseById.get(key);
       const phaseNodeId = `${wfNodeId}:p:${pIdx}:${key}`;
       const isRef = p.kind === "workflow-ref";
+      const live = ps?.agent ? agentStates[ps.agent] ?? null : null;
+      const isActive = live === "running" || live === "thinking";
       nodes.push({
         id: phaseNodeId,
         type: "phase",
@@ -229,22 +249,33 @@ function buildGraph(
           mode: isRef ? "ref" : ps?.mode ?? null,
           agent: ps?.agent ?? null,
           workflowRef: isRef ? key : null,
-          liveState: ps?.agent ? agentStates[ps.agent] ?? null : null,
+          liveState: live,
         } as PhaseNodeData,
       });
+      // The spine edge lights up (copper + animated) when the phase it feeds
+      // into is the one currently running — the "data flowing in" cue.
       edges.push({
         id: `${prev}->${phaseNodeId}`,
         source: prev,
         target: phaseNodeId,
-        markerEnd: { type: MarkerType.ArrowClosed },
-        style: { stroke: "var(--border-strong)", strokeWidth: 1.25 },
+        animated: isActive,
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: isActive ? "var(--copper)" : undefined,
+        },
+        style: {
+          stroke: isActive ? "var(--copper)" : "var(--border-strong)",
+          strokeWidth: isActive ? 1.75 : 1.25,
+        },
       });
       phaseNodeByValue.set(key, phaseNodeId);
+      phaseIdxByValue.set(key, pIdx);
       // Every on_verdict route with a target phase becomes a branch edge.
       const routes = (p.branches ?? []).filter((b) => b.target);
       for (const b of routes) {
         branchSpecs.push({
           from: phaseNodeId,
+          fromIdx: pIdx,
           verdict: b.verdict,
           target: b.target!,
           max: b.verdict === "rework" ? p.maxReworkAttempts : null,
@@ -254,6 +285,7 @@ function buildGraph(
       if (p.reworkTarget && !routes.some((b) => b.verdict === "rework")) {
         branchSpecs.push({
           from: phaseNodeId,
+          fromIdx: pIdx,
           verdict: "rework",
           target: p.reworkTarget,
           max: p.maxReworkAttempts,
@@ -264,12 +296,16 @@ function buildGraph(
 
     // Branch edges: approve/advance = green solid, rework = yellow dashed loop,
     // reject/fail = red. Routing is derived from on_verdict, not stored linear.
+    // Back-edges (target sits at or before the source) route through the
+    // dedicated bottom handles so the loop bows BELOW the spine — never over it.
     for (const spec of branchSpecs) {
       const targetNode = phaseNodeByValue.get(spec.target);
       if (!targetNode) continue;
       const v = spec.verdict.toLowerCase();
       const isRework = v === "rework";
       const isFail = v === "fail" || v === "reject";
+      const targetIdx = phaseIdxByValue.get(spec.target) ?? spec.fromIdx + 1;
+      const isBack = targetIdx <= spec.fromIdx;
       const color = isRework
         ? "var(--yellow)"
         : isFail
@@ -281,7 +317,9 @@ function buildGraph(
         id: `branch:${spec.from}:${v}->${targetNode}`,
         source: spec.from,
         target: targetNode,
-        type: "default",
+        ...(isBack
+          ? { sourceHandle: "loop-out", targetHandle: "loop-in", type: "smoothstep" }
+          : { type: "default" }),
         animated: isRework,
         label: isRework && spec.max ? `rework ×${spec.max}` : spec.verdict,
         style: {
