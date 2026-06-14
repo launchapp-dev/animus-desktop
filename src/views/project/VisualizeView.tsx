@@ -1003,18 +1003,68 @@ export function VisualizeView({ project }: { project: Project }) {
                   )}
                 </div>
               )}
+              {selectedPhase.command && (
+                <div className="rt-row">
+                  <span className="rt-row__role">run</span>
+                  <code className="rt-row__name">
+                    {selectedPhase.command} {selectedPhase.commandArgs.join(" ")}
+                  </code>
+                </div>
+              )}
+              {(selectedPhase.decisionVerdicts?.length ?? 0) > 0 && (
+                <div className="rt-row">
+                  <span className="rt-row__role">verdicts</span>
+                  <span className="wf-cfg__chips">
+                    {selectedPhase.decisionVerdicts.map((v) => (
+                      <span key={v} className={`wf-cfg__chip wf-cfg__chip--${v.toLowerCase()}`}>
+                        {v}
+                      </span>
+                    ))}
+                  </span>
+                </div>
+              )}
               {selectedPhase.directive && (
                 <div className="sk-detail__section">
                   <div className="sk-detail__label">Directive</div>
                   <pre className="sk-detail__prompt">{selectedPhase.directive}</pre>
                 </div>
               )}
+              {overlay &&
+                (() => {
+                  const run = runs.find((r) => r.wfUuid === overlayRun);
+                  const attempts = overlay.attempts.get(selectedPhase.id) ?? 0;
+                  const taken = overlay.taken.has(selectedPhase.id);
+                  if (!run) return null;
+                  return (
+                    <div className="sk-detail__section">
+                      <div className="sk-detail__label">In selected run</div>
+                      <div className="rt-row">
+                        <span className="rt-row__role">status</span>
+                        <span
+                          className="rt-row__name"
+                          style={{ color: taken ? statusColor(run.status) : "var(--text-faint)" }}
+                        >
+                          {taken ? run.status : "not exercised"}
+                        </span>
+                      </div>
+                      {attempts > 0 && (
+                        <div className="rt-row">
+                          <span className="rt-row__role">ran</span>
+                          <span className="rt-row__name">
+                            ×{attempts}
+                            {attempts > 1 ? " (rework)" : ""}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               <button
                 type="button"
                 className="plugins-pane__ghost"
                 onClick={() => setMode("journal")}
               >
-                Open run in Journal →
+                {overlay ? "Open this run in Journal →" : "Open run in Journal →"}
               </button>
               {routingCtx &&
                 (routingCtx.editable ? (
