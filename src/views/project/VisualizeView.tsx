@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Loader2, Play } from "lucide-react";
 import {
   Background,
   BackgroundVariant,
@@ -97,11 +98,15 @@ function PhaseNode({ data }: NodeProps) {
     >
       <Handle type="target" position={Position.Left} className="rf-handle" />
       <div className="rf-phase-node__head">
-        <span
-          aria-hidden
-          className={`rf-phase-node__dot ${live === "running" || live === "thinking" ? "rf-phase-node__dot--pulse" : ""}`}
-          style={{ background: liveColor ?? colorFor(d.mode) }}
-        />
+        {live === "running" || live === "thinking" ? (
+          <Loader2 size={12} className="rf-spin" style={{ color: liveColor ?? "var(--copper)" }} />
+        ) : (
+          <span
+            aria-hidden
+            className="rf-phase-node__dot"
+            style={{ background: liveColor ?? colorFor(d.mode) }}
+          />
+        )}
         <span className="rf-phase-node__title">{d.label}</span>
         {live && <span className="rf-phase-node__live">{live}</span>}
       </div>
@@ -151,7 +156,15 @@ function WorkflowNode({ data }: NodeProps) {
             d.onRun?.();
           }}
         >
-          {d.running ? "Running…" : "▶ Run"}
+          {d.running ? (
+            <>
+              <Loader2 size={11} className="rf-spin" /> Running…
+            </>
+          ) : (
+            <>
+              <Play size={11} /> Run
+            </>
+          )}
         </button>
       )}
       <Handle type="source" position={Position.Right} className="rf-handle" />

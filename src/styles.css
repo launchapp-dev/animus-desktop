@@ -2563,6 +2563,13 @@ a {
   cursor: pointer;
 }
 .rf-workflow-node__run:disabled { opacity: 0.6; cursor: default; }
+.rf-workflow-node__run {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.rf-spin { animation: spin 0.9s linear infinite; flex-shrink: 0; }
 /* Grid-of-runs (runs × phases matrix) */
 .rf-grid { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
 .rf-grid--empty { display: flex; align-items: center; justify-content: center; color: var(--text-faint); font-size: 12px; }
