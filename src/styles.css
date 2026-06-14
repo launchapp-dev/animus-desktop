@@ -8076,6 +8076,24 @@ textarea.wf-input { font-family: var(--font-mono); font-size: 11.5px; resize: ve
 }
 .wf-directive__modal-head { display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 600; color: var(--text); }
 .wf-directive__modal-area { flex: 1; resize: none; font-size: 13px; line-height: 1.55; }
+/* Per-verdict routing rows (builder inspector) */
+.wf-routes { display: flex; flex-direction: column; gap: 6px; }
+.wf-routes__hint { margin: 0; font-size: 10.5px; line-height: 1.45; color: var(--text-faint); }
+.wf-routes__row { display: flex; align-items: center; gap: 8px; }
+.wf-routes__verdict {
+  flex: 0 0 92px;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-faint);
+}
+.wf-routes__verdict em { font-style: normal; font-weight: 400; font-size: 9px; opacity: 0.7; }
+.wf-routes__verdict--approve, .wf-routes__verdict--advance, .wf-routes__verdict--pass { color: var(--green); }
+.wf-routes__verdict--rework { color: var(--yellow); }
+.wf-routes__verdict--reject, .wf-routes__verdict--fail { color: var(--crimson); }
+.wf-routes__select { flex: 1; }
 .wf-builder__lintchip { font-size: 11px; padding: 2px 9px; border-radius: 999px; }
 .wf-builder__lintchip--err { color: var(--crimson); background: var(--red-bg); }
 .wf-builder__main { flex: 1; min-height: 0; display: flex; }

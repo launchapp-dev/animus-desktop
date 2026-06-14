@@ -17,9 +17,23 @@ import {
   animusWorkflowDefinitionUpsert,
   animusWorkflowPhaseGet,
   animusWorkflowPhaseUpsert,
-  animusWorkflowSetRework,
+  animusWorkflowSetRouting,
   type AnimusStatus,
+  type PhaseRouting,
 } from "../../api/animus";
+
+// Canonical decision verdicts when a phase doesn't declare its own enum.
+// Routing maps each verdict → a target phase (engine default: approve advances,
+// reject halts, rework loops). animus accepts `target` only, no terminal action.
+const DEFAULT_VERDICTS = ["approve", "rework", "reject"];
+const VERDICT_HINT: Record<string, string> = {
+  approve: "on pass",
+  advance: "on pass",
+  pass: "on pass",
+  rework: "loop back",
+  reject: "on fail",
+  fail: "on fail",
+};
 import type { Project } from "../../types/contracts";
 import { AgentFace, type AgentState } from "../../components/AgentFace";
 import { useProjectAgentLiveStates } from "../../state/projectEvents";
@@ -410,7 +424,7 @@ function WorkflowCanvas({
   phaseInfo,
   phaseIssues,
   availablePhases,
-  reworkTargets,
+  routes,
   onInsert,
   onNewPhaseAt,
   onSelectPhase,
@@ -420,7 +434,7 @@ function WorkflowCanvas({
   phaseInfo: PhaseInfo;
   phaseIssues?: Record<string, "error" | "warn">;
   availablePhases: string[];
-  reworkTargets: Record<string, string>;
+  routes: Record<string, Record<string, string>>;
   onInsert: (index: number, phaseId: string) => void;
   onNewPhaseAt: (index: number) => void;
   onSelectPhase: (id: string) => void;
@@ -486,33 +500,39 @@ function WorkflowCanvas({
     data: { onPlus: (x: number, y: number) => setChooser({ index: i + 1, x, y }) },
   }));
 
-  // Decision gates: a gated phase advances on "approve" (the solid spine edge)
-  // and re-runs the previous phase on "reject" — drawn as a dashed loop-back.
-  const reworkEdges = phases.flatMap((p, i) => {
-    const explicit = reworkTargets[p];
-    const target =
-      explicit && phases.includes(explicit)
-        ? explicit
-        : phaseInfo[p]?.gate && i > 0
-          ? phases[i - 1]!
-          : null;
-    if (!target || target === p) return [];
-    return [
-      {
-        id: `rework:${p}`,
-        source: p,
-        target,
-        type: "default",
-        animated: true,
-        label: "rework",
-        style: { stroke: "var(--yellow)", strokeDasharray: "5 4" },
-        labelStyle: { fill: "var(--yellow)", fontSize: 10 },
-        labelBgStyle: { fill: "var(--bg-elevated)", fillOpacity: 0.9 },
-        markerEnd: { type: MarkerType.ArrowClosed, color: "var(--yellow)" },
-      },
-    ];
+  // Decision gates: each configured verdict route becomes a labeled branch
+  // edge — approve/pass green, rework yellow loop-back, reject/fail red.
+  const branchEdges = phases.flatMap((p) => {
+    const verdicts = routes[p] ?? {};
+    return Object.entries(verdicts).flatMap(([verdict, target]) => {
+      if (!target || target === p || !phases.includes(target)) return [];
+      const v = verdict.toLowerCase();
+      const color =
+        v === "rework"
+          ? "var(--yellow)"
+          : v === "reject" || v === "fail"
+            ? "var(--crimson)"
+            : v === "approve" || v === "advance" || v === "pass"
+              ? "var(--green)"
+              : "var(--copper)";
+      const dashed = v !== "approve" && v !== "advance" && v !== "pass";
+      return [
+        {
+          id: `route:${p}:${v}`,
+          source: p,
+          target,
+          type: "default",
+          animated: v === "rework",
+          label: verdict,
+          style: { stroke: color, ...(dashed ? { strokeDasharray: "5 4" } : {}) },
+          labelStyle: { fill: color, fontSize: 10 },
+          labelBgStyle: { fill: "var(--bg-elevated)", fillOpacity: 0.9 },
+          markerEnd: { type: MarkerType.ArrowClosed, color },
+        },
+      ];
+    });
   });
-  const allEdges = [...edges, ...reworkEdges];
+  const allEdges = [...edges, ...branchEdges];
 
   const unused = availablePhases.filter((p) => !phases.includes(p));
 
@@ -684,8 +704,8 @@ function PhaseConfigPanel({
   phaseId,
   agents,
   siblingPhases,
-  reworkTarget,
-  onReworkTarget,
+  routes,
+  onRoutes,
   onClose,
   onSaved,
 }: {
@@ -693,8 +713,8 @@ function PhaseConfigPanel({
   phaseId: string;
   agents: { id: string }[];
   siblingPhases?: string[];
-  reworkTarget?: string;
-  onReworkTarget?: (target: string) => void;
+  routes?: Record<string, string>;
+  onRoutes?: (verdict: string, target: string) => void;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -742,6 +762,18 @@ function PhaseConfigPanel({
       live = false;
     };
   }, [repoPath, phaseId]);
+
+  // Verdicts this phase can emit: its declared decision_contract enum, else the
+  // canonical approve/rework/reject. Each can route to any sibling phase.
+  const verdicts = useMemo(() => {
+    const dc = runtime?.decision_contract as
+      | { fields?: { verdict?: { enum?: unknown } } }
+      | null
+      | undefined;
+    const en = dc?.fields?.verdict?.enum;
+    if (Array.isArray(en) && en.length > 0) return en.map(String);
+    return DEFAULT_VERDICTS;
+  }, [runtime]);
 
   const save = async () => {
     const base = runtime ?? {};
@@ -852,22 +884,36 @@ function PhaseConfigPanel({
               </label>
             </>
           )}
-          {gate && onReworkTarget && siblingPhases && (
-            <label className="wf-field">
-              <span>On reject, rework loops to</span>
-              <select
-                className="wf-input"
-                value={reworkTarget ?? ""}
-                onChange={(e) => onReworkTarget(e.target.value)}
-              >
-                <option value="">(default: previous phase)</option>
-                {siblingPhases.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
-            </label>
+          {gate && onRoutes && siblingPhases && (
+            <div className="wf-field wf-routes">
+              <span>Verdict routing</span>
+              <p className="wf-routes__hint">
+                Where each decision verdict sends the run. Leave on default to
+                advance (pass) or halt (fail).
+              </p>
+              {verdicts.map((v) => (
+                <div key={v} className="wf-routes__row">
+                  <span className={`wf-routes__verdict wf-routes__verdict--${v.toLowerCase()}`}>
+                    {v}
+                    {VERDICT_HINT[v.toLowerCase()] && (
+                      <em>{VERDICT_HINT[v.toLowerCase()]}</em>
+                    )}
+                  </span>
+                  <select
+                    className="wf-input wf-routes__select"
+                    value={routes?.[v] ?? ""}
+                    onChange={(e) => onRoutes(v, e.target.value)}
+                  >
+                    <option value="">→ default</option>
+                    {siblingPhases.map((p) => (
+                      <option key={p} value={p}>
+                        → {p}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
           )}
           {error && <div className="wf-compose__err">{error}</div>}
           <div className="wf-compose__actions">
@@ -1294,8 +1340,9 @@ function WorkflowComposer({
   // When set, a freshly-authored phase is spliced in at this index (vs appended).
   const [pendingInsert, setPendingInsert] = useState<number | null>(null);
   const [selectedPhase, setSelectedPhase] = useState<string | null>(null);
-  // Per-phase rework target (workflow-step routing), applied on Create.
-  const [reworkTargets, setReworkTargets] = useState<Record<string, string>>({});
+  // Per-phase, per-verdict routing (workflow-step routing), applied on Create.
+  // Shape: { phaseId: { verdict: targetPhase } }.
+  const [routes, setRoutes] = useState<Record<string, Record<string, string>>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -1372,13 +1419,22 @@ function WorkflowComposer({
         budget: null,
       });
       if (res.ok) {
-        // Apply per-phase rework routing (upsert can't carry inline on_verdict).
-        const targets = phases
-          .filter((p) => reworkTargets[p])
-          .map((p) => ({ phase: p, target: reworkTargets[p]!, maxAttempts: 3 }));
-        if (targets.length > 0) {
+        // Apply per-phase, per-verdict routing (upsert can't carry inline
+        // on_verdict — set_routing rewrites the generated overlay).
+        const routing: PhaseRouting[] = phases
+          .map((p): PhaseRouting | null => {
+            const verdicts = routes[p] ?? {};
+            const specs = Object.entries(verdicts)
+              .filter(([, target]) => target)
+              .map(([verdict, target]) => ({ verdict, target }));
+            return specs.length > 0
+              ? { phase: p, maxAttempts: 3, routes: specs }
+              : null;
+          })
+          .filter((x): x is PhaseRouting => x !== null);
+        if (routing.length > 0) {
           try {
-            await animusWorkflowSetRework(repoPath, wid, targets);
+            await animusWorkflowSetRouting(repoPath, wid, routing);
           } catch {
             /* non-fatal — workflow still created without routing */
           }
@@ -1445,7 +1501,7 @@ function WorkflowComposer({
                 <ol className="wf-review__phases">
                   {phases.map((p, i) => {
                     const info = phaseInfo[p];
-                    const rt = reworkTargets[p];
+                    const pr = routes[p] ?? {};
                     return (
                       <li key={p} className="wf-review__phase">
                         <span className="wf-review__idx">{i + 1}</span>
@@ -1455,9 +1511,13 @@ function WorkflowComposer({
                           {info?.agent ? ` · @${info.agent}` : ""}
                           {info?.gate ? " · gate" : ""}
                         </span>
-                        {rt && (
-                          <span className="wf-review__route">on reject → {rt}</span>
-                        )}
+                        {Object.entries(pr)
+                          .filter(([, t]) => t)
+                          .map(([v, t]) => (
+                            <span key={v} className="wf-review__route">
+                              on {v} → {t}
+                            </span>
+                          ))}
                       </li>
                     );
                   })}
@@ -1588,7 +1648,7 @@ function WorkflowComposer({
             phaseInfo={phaseInfo}
             phaseIssues={phaseIssues}
             availablePhases={pickable}
-            reworkTargets={reworkTargets}
+            routes={routes}
             onInsert={insertPhaseAt}
             onNewPhaseAt={(index) => {
               setPendingInsert(index);
@@ -1644,11 +1704,14 @@ function WorkflowComposer({
               phaseId={selectedPhase}
               agents={agents}
               siblingPhases={phases.filter((p) => p !== selectedPhase)}
-              reworkTarget={reworkTargets[selectedPhase]}
-              onReworkTarget={(t) =>
-                setReworkTargets((prev) => {
+              routes={routes[selectedPhase] ?? {}}
+              onRoutes={(verdict, target) =>
+                setRoutes((prev) => {
+                  const cur = { ...(prev[selectedPhase] ?? {}) };
+                  if (target) cur[verdict] = target;
+                  else delete cur[verdict];
                   const next = { ...prev };
-                  if (t) next[selectedPhase] = t;
+                  if (Object.keys(cur).length > 0) next[selectedPhase] = cur;
                   else delete next[selectedPhase];
                   return next;
                 })
