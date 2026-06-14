@@ -515,6 +515,23 @@ export function animusCostWorkflow(
   );
 }
 
+export interface PhaseOutput {
+  phase_id?: string | null;
+  output?: unknown;
+  content?: unknown;
+  [key: string]: unknown;
+}
+
+/** Persisted per-phase outputs for a workflow (the data a phase produced and
+ *  that downstream phases read). Optionally scoped to one phase. */
+export function animusOutputPhaseOutputs(
+  path: string,
+  workflowId: string,
+  phaseId?: string,
+): Promise<AnimusCliResult<{ outputs: PhaseOutput[]; phase_id: string | null; workflow_id: string }>> {
+  return invoke("animus_output_phase_outputs", { path, workflowId, phaseId });
+}
+
 // --- Interactions (questions + approvals; animus >= 0.5.15) ------------------
 
 export interface InteractionQuestionOption {

@@ -26,8 +26,10 @@ import {
   type WorkflowYamlReport,
 } from "../../api/workflow_yaml";
 import {
+  animusOutputPhaseOutputs,
   animusWorkflowRun,
   animusWorkflowSetRouting,
+  type PhaseOutput,
   type RouteSpec,
 } from "../../api/animus";
 import {
@@ -983,6 +985,56 @@ export function VisualizeView({ project }: { project: Project }) {
     };
   })();
 
+  // The workflow id that owns the selected phase (for reading its outputs).
+  const selectedWfId = useMemo(() => {
+    if (!report || !selectedPhase) return null;
+    const wf = report.workflows.find((w) =>
+      w.phases.some((p) => p.kind === "phase" && p.value === selectedPhase.id),
+    );
+    return wf?.id ?? null;
+  }, [report, selectedPhase]);
+
+  // `{{var}}` references in the directive = dispatch_input variables this phase
+  // consumes. Static property of the directive — shown even without a run.
+  const directiveVars = useMemo(() => {
+    const dir = selectedPhase?.directive ?? "";
+    const set = new Set<string>();
+    for (const m of dir.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g)) set.add(m[1]!);
+    return [...set];
+  }, [selectedPhase]);
+
+  // Persisted output this phase produced (the data downstream phases read).
+  const [phaseOut, setPhaseOut] = useState<string | null>(null);
+  useEffect(() => {
+    const path = project.repo_path?.trim();
+    if (!path || !selectedWfId || !selectedPhase) {
+      setPhaseOut(null);
+      return;
+    }
+    let cancelled = false;
+    animusOutputPhaseOutputs(path, selectedWfId, selectedPhase.id)
+      .then((res) => {
+        if (cancelled) return;
+        const outs: PhaseOutput[] = res.ok && res.data ? res.data.outputs ?? [] : [];
+        if (outs.length === 0) {
+          setPhaseOut(null);
+          return;
+        }
+        const text = outs
+          .map((o) => {
+            const body = o.output ?? o.content ?? o;
+            return typeof body === "string" ? body : JSON.stringify(body, null, 2);
+          })
+          .join("\n\n")
+          .trim();
+        setPhaseOut(text || null);
+      })
+      .catch(() => !cancelled && setPhaseOut(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedWfId, selectedPhase, project.repo_path]);
+
   if (loading && !report) {
     return (
       <p style={{ color: "var(--text-muted)", fontSize: 12 }}>
@@ -1172,10 +1224,28 @@ export function VisualizeView({ project }: { project: Project }) {
                   </span>
                 </div>
               )}
+              {directiveVars.length > 0 && (
+                <div className="rt-row">
+                  <span className="rt-row__role">inputs</span>
+                  <span className="wf-cfg__chips" title="dispatch_input variables this phase's directive references">
+                    {directiveVars.map((v) => (
+                      <span key={v} className="wf-cfg__chip wf-cfg__chip--var">
+                        {`{{${v}}}`}
+                      </span>
+                    ))}
+                  </span>
+                </div>
+              )}
               {selectedPhase.directive && (
                 <div className="sk-detail__section">
                   <div className="sk-detail__label">Directive</div>
                   <pre className="sk-detail__prompt">{selectedPhase.directive}</pre>
+                </div>
+              )}
+              {phaseOut && (
+                <div className="sk-detail__section">
+                  <div className="sk-detail__label">Persisted output</div>
+                  <pre className="wf-source wf-source--output">{phaseOut}</pre>
                 </div>
               )}
               {overlay &&

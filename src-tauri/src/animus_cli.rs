@@ -862,6 +862,27 @@ pub async fn animus_cost_workflow(
     run_animus_json(&path, &["cost", "workflow", rid]).await
 }
 
+/// Read persisted per-phase outputs for a workflow (optionally a single phase).
+/// This is the data a phase produced and that downstream phases read.
+#[tauri::command]
+pub async fn animus_output_phase_outputs(
+    path: String,
+    workflow_id: String,
+    phase_id: Option<String>,
+) -> Result<AnimusCliResult, String> {
+    let wid = workflow_id.trim();
+    if wid.is_empty() {
+        return Err("workflow id is required".to_string());
+    }
+    let mut args: Vec<&str> = vec!["output", "phase-outputs", "--workflow-id", wid];
+    let pid = phase_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    if let Some(p) = pid {
+        args.push("--phase-id");
+        args.push(p);
+    }
+    run_animus_json(&path, &args).await
+}
+
 /// Approve or reject a pending workflow phase gate. `note` is required by the
 /// CLI for reject; approve defaults it.
 #[tauri::command]

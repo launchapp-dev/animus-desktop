@@ -2653,6 +2653,8 @@ a {
 .wf-cfg__chip--approve, .wf-cfg__chip--advance, .wf-cfg__chip--pass { color: var(--green); }
 .wf-cfg__chip--rework { color: var(--brass); }
 .wf-cfg__chip--reject, .wf-cfg__chip--fail { color: var(--red); }
+.wf-cfg__chip--var { color: var(--copper); background: var(--copper-bg-soft); border-color: var(--copper); }
+.wf-source--output { max-height: 260px; white-space: pre-wrap; word-break: break-word; }
 .rf-runpick { display: inline-flex; align-items: center; gap: 6px; }
 .rf-runpick__label {
   font-family: var(--font-mono);
