@@ -492,6 +492,77 @@ function GridOfRuns({ runs, now }: { runs: WorkflowRunSummary[]; now: number }) 
   );
 }
 
+/** Timeline / Gantt of recent runs: one bar per run positioned by start time,
+ *  width by duration, colored by status. Surfaces cadence, duration, and gaps —
+ *  the time dimension the grid can't show. */
+function GanttOfRuns({
+  runs,
+  now,
+  onPick,
+}: {
+  runs: WorkflowRunSummary[];
+  now: number;
+  onPick: (uuid: string) => void;
+}) {
+  const rows = runs.slice(0, 40).filter((r) => r.startedMs > 0);
+  if (rows.length === 0) {
+    return <div className="rf-grid rf-grid--empty">No timed runs recorded yet.</div>;
+  }
+  const endOf = (r: WorkflowRunSummary): number => {
+    const e = r.endedTs ? Date.parse(r.endedTs) : NaN;
+    return Number.isFinite(e) ? e : Math.min(now, r.startedMs + 1000);
+  };
+  const minStart = Math.min(...rows.map((r) => r.startedMs));
+  const maxEnd = Math.max(...rows.map(endOf), minStart + 1);
+  const span = Math.max(1, maxEnd - minStart);
+  const fmtDur = (ms: number): string => {
+    if (ms < 1000) return `${ms}ms`;
+    const s = Math.round(ms / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    return `${m}m ${s % 60}s`;
+  };
+  return (
+    <div className="rf-gantt">
+      <div className="rf-gantt__axis">
+        <span>{relTime(now, minStart)}</span>
+        <span>{maxEnd >= now - 1000 ? "now" : relTime(now, maxEnd)}</span>
+      </div>
+      <div className="rf-gantt__rows">
+        {rows.map((r) => {
+          const end = endOf(r);
+          const left = ((r.startedMs - minStart) / span) * 100;
+          const width = Math.max(1.5, ((end - r.startedMs) / span) * 100);
+          const running = r.status === "running";
+          return (
+            <button
+              key={r.wfUuid}
+              type="button"
+              className="rf-gantt__row"
+              onClick={() => onPick(r.wfUuid)}
+              title={`${r.workflowRef ?? "run"} · ${r.status} · ${fmtDur(end - r.startedMs)}`}
+            >
+              <span className="rf-gantt__label">{r.workflowRef ?? "run"}</span>
+              <span className="rf-gantt__track">
+                <span
+                  className={`rf-gantt__bar ${running ? "rf-gantt__bar--running" : ""}`}
+                  style={{
+                    left: `${left}%`,
+                    width: `${width}%`,
+                    background: statusColor(r.status),
+                  }}
+                >
+                  <span className="rf-gantt__dur">{fmtDur(end - r.startedMs)}</span>
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 type RouteChoice =
   | { kind: "default" }
   | { kind: "phase"; value: string };
@@ -657,7 +728,7 @@ export function VisualizeView({ project }: { project: Project }) {
   const [running, setRunning] = useState<string | null>(null);
   const [runMsg, setRunMsg] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const [gridMode, setGridMode] = useState(false);
+  const [view, setView] = useState<"graph" | "gantt" | "grid">("graph");
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
   const [overlayRun, setOverlayRun] = useState<string | null>(null);
   const [now] = useState(() => Date.now());
@@ -826,7 +897,7 @@ export function VisualizeView({ project }: { project: Project }) {
         {runMsg && (
           <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{runMsg}</span>
         )}
-        {!gridMode && runs.length > 0 && (
+        {view === "graph" && runs.length > 0 && (
           <label className="rf-runpick" style={{ marginLeft: "auto" }}>
             <span className="rf-runpick__label">Overlay run</span>
             <select
@@ -845,26 +916,42 @@ export function VisualizeView({ project }: { project: Project }) {
         )}
         <div
           className="wf-seg wf-seg--sm"
-          style={gridMode || runs.length === 0 ? { marginLeft: "auto" } : undefined}
+          style={view !== "graph" || runs.length === 0 ? { marginLeft: "auto" } : undefined}
         >
           <button
             type="button"
-            className={!gridMode ? "wf-seg__on" : ""}
-            onClick={() => setGridMode(false)}
+            className={view === "graph" ? "wf-seg__on" : ""}
+            onClick={() => setView("graph")}
           >
             Graph
           </button>
           <button
             type="button"
-            className={gridMode ? "wf-seg__on" : ""}
-            onClick={() => setGridMode(true)}
+            className={view === "gantt" ? "wf-seg__on" : ""}
+            onClick={() => setView("gantt")}
+          >
+            Gantt
+          </button>
+          <button
+            type="button"
+            className={view === "grid" ? "wf-seg__on" : ""}
+            onClick={() => setView("grid")}
           >
             Grid
           </button>
         </div>
       </div>
-      {gridMode ? (
+      {view === "grid" ? (
         <GridOfRuns runs={runs} now={now} />
+      ) : view === "gantt" ? (
+        <GanttOfRuns
+          runs={runs}
+          now={now}
+          onPick={(uuid) => {
+            setOverlayRun(uuid);
+            setView("graph");
+          }}
+        />
       ) : (
       <div className="rf-canvas">
         <ReactFlow

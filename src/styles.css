@@ -2603,6 +2603,58 @@ a {
   padding: 4px 7px;
   max-width: 240px;
 }
+/* Gantt / timeline of runs */
+.rf-gantt { flex: 1; min-height: 0; overflow: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+.rf-gantt__axis {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  padding: 0 0 4px 132px;
+  border-bottom: var(--hairline) solid var(--border);
+}
+.rf-gantt__rows { display: flex; flex-direction: column; gap: 3px; padding-top: 6px; }
+.rf-gantt__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  border-radius: 6px;
+  padding: 2px 0;
+  cursor: pointer;
+}
+.rf-gantt__row:hover { background: var(--bg-hover); }
+.rf-gantt__label {
+  flex: 0 0 120px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rf-gantt__track { position: relative; flex: 1; height: 18px; }
+.rf-gantt__bar {
+  position: absolute;
+  top: 2px;
+  height: 14px;
+  min-width: 3px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  padding: 0 5px;
+  overflow: hidden;
+}
+.rf-gantt__bar--running { animation: pulse 1.4s ease-in-out infinite; }
+.rf-gantt__dur {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--accent-fg);
+  white-space: nowrap;
+}
 /* Grid-of-runs (runs × phases matrix) */
 .rf-grid { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
 .rf-grid--empty { display: flex; align-items: center; justify-content: center; color: var(--text-faint); font-size: 12px; }
