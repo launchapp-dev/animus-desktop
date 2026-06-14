@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { pluginInstall, pluginList } from "../../api/_invoke";
 import {
   animusFlavorCurrent,
+  animusFlavorInstall,
+  animusFlavorList,
   type FlavorCurrent,
+  type FlavorListEntry,
   type FlavorManifest,
   type FlavorRoleSet,
 } from "../../api/animus";
@@ -115,12 +118,14 @@ function PluginRow({
 export function PluginsView({ project }: { project: Project }) {
   const path = project.repo_path?.trim() ?? "";
   const [flavor, setFlavor] = useState<FlavorCurrent | null>(null);
+  const [flavors, setFlavors] = useState<FlavorListEntry[]>([]);
   const [installed, setInstalled] = useState<Plugin[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [installing, setInstalling] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [showRecommended, setShowRecommended] = useState(false);
+  const [switching, setSwitching] = useState(false);
 
   const load = useCallback(async () => {
     if (!path) {
@@ -130,7 +135,11 @@ export function PluginsView({ project }: { project: Project }) {
     setLoading(true);
     setError(null);
     try {
-      const [fres, list] = await Promise.all([animusFlavorCurrent(path), pluginList()]);
+      const [fres, list, lres] = await Promise.all([
+        animusFlavorCurrent(path),
+        pluginList(),
+        animusFlavorList(path),
+      ]);
       if (!fres.ok || !fres.data) {
         setError(
           (fres.error && typeof fres.error === "object" && "message" in fres.error
@@ -141,6 +150,7 @@ export function PluginsView({ project }: { project: Project }) {
         setFlavor(fres.data);
       }
       setInstalled(list);
+      if (lres.ok && lres.data) setFlavors(lres.data.flavors ?? []);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -208,6 +218,27 @@ export function PluginsView({ project }: { project: Project }) {
     }
   }
 
+  async function switchFlavor(name: string) {
+    if (!name || name === flavor?.name) return;
+    setSwitching(true);
+    setError(null);
+    try {
+      const res = await animusFlavorInstall(path, name);
+      if (!res.ok) {
+        setError(
+          (res.error && typeof res.error === "object" && "message" in res.error
+            ? String((res.error as { message: unknown }).message)
+            : null) ?? res.rawStderr ?? `could not switch to flavor "${name}"`,
+        );
+      }
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSwitching(false);
+    }
+  }
+
   const ready = flavor != null && missingRequired.length === 0;
 
   return (
@@ -225,6 +256,25 @@ export function PluginsView({ project }: { project: Project }) {
           )}
         </div>
         <div className="rt-head__actions">
+          {flavors.length > 1 && flavor && (
+            <label className="rt-flavor-pick" title="Switch this project's flavor">
+              <span className="rt-flavor-pick__label">Flavor</span>
+              <select
+                className="rt-flavor-pick__select"
+                value={flavor.name}
+                disabled={switching || loading}
+                onChange={(e) => void switchFlavor(e.target.value)}
+              >
+                {flavors.map((f) => (
+                  <option key={f.name} value={f.name} disabled={!f.available}>
+                    {f.title || f.name}
+                    {f.name === flavor.name ? " (current)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {switching && <span className="rt-flavor-pick__busy">Switching…</span>}
           {flavor && (
             <span className={`rt-status rt-status--${ready ? "ok" : "gap"}`}>
               <span className="rt-status__dot" aria-hidden />

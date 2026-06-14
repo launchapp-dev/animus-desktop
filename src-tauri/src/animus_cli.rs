@@ -205,6 +205,38 @@ pub async fn animus_flavor_current(path: String) -> Result<AnimusCliResult, Stri
     run_animus_json(&path, &["flavor", "current"]).await
 }
 
+/// List flavor manifests available on disk for this project.
+#[tauri::command]
+pub async fn animus_flavor_list(path: String) -> Result<AnimusCliResult, String> {
+    run_animus_json(&path, &["flavor", "list"]).await
+}
+
+/// Install (switch to) a flavor: installs every plugin its manifest marks
+/// `required`, optionally also the `recommended` set. Confirmation prompts are
+/// suppressed (`--yes`) since the desktop drives this from an explicit action.
+#[tauri::command]
+pub async fn animus_flavor_install(
+    path: String,
+    name: String,
+    include_recommended: bool,
+) -> Result<AnimusCliResult, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("flavor name is required".into());
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+    {
+        return Err("invalid flavor name".into());
+    }
+    let mut args: Vec<&str> = vec!["flavor", "install", name, "--yes"];
+    if include_recommended {
+        args.push("--include-recommended");
+    }
+    run_animus_json(&path, &args).await
+}
+
 fn valid_phase_id(s: &str) -> bool {
     !s.is_empty()
         && s.chars()

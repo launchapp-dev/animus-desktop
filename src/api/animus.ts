@@ -261,6 +261,36 @@ export function animusFlavorCurrent(
   return invoke<AnimusCliResult<FlavorCurrent>>("animus_flavor_current", { path });
 }
 
+export interface FlavorListEntry {
+  name: string;
+  available: boolean;
+  title: string;
+  version: string;
+  description: string;
+}
+
+export interface FlavorList {
+  flavors: FlavorListEntry[];
+}
+
+export function animusFlavorList(
+  path: string,
+): Promise<AnimusCliResult<FlavorList>> {
+  return invoke<AnimusCliResult<FlavorList>>("animus_flavor_list", { path });
+}
+
+export function animusFlavorInstall(
+  path: string,
+  name: string,
+  includeRecommended = false,
+): Promise<AnimusCliResult> {
+  return invoke<AnimusCliResult>("animus_flavor_install", {
+    path,
+    name,
+    includeRecommended,
+  });
+}
+
 // --- Skills ------------------------------------------------------------------
 
 export interface SkillSummary {

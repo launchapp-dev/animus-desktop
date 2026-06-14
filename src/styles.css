@@ -7403,6 +7403,25 @@ a {
 .rt-head__sub strong { color: var(--text); font-weight: 600; }
 .rt-head__ver { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); margin-left: 8px; }
 .rt-head__actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.rt-flavor-pick { display: inline-flex; align-items: center; gap: 6px; }
+.rt-flavor-pick__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.rt-flavor-pick__select {
+  font-size: 12px;
+  color: var(--text);
+  background: var(--surface-1);
+  border: var(--hairline) solid var(--border);
+  border-radius: 8px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+.rt-flavor-pick__select:disabled { opacity: 0.55; cursor: progress; }
+.rt-flavor-pick__busy { font-size: 11px; color: var(--copper); font-family: var(--font-mono); }
 .rt-status {
   display: inline-flex;
   align-items: center;
