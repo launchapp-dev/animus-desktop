@@ -2509,6 +2509,44 @@ a {
   cursor: pointer;
 }
 .rf-workflow-node__run:disabled { opacity: 0.6; cursor: default; }
+/* Grid-of-runs (runs × phases matrix) */
+.rf-grid { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
+.rf-grid--empty { display: flex; align-items: center; justify-content: center; color: var(--text-faint); font-size: 12px; }
+.rf-grid__table { border-collapse: collapse; font-size: 11px; }
+.rf-grid__corner {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--content-bg);
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  padding: 4px 8px;
+}
+.rf-grid__colhead {
+  padding: 4px 6px;
+  vertical-align: bottom;
+  min-width: 26px;
+}
+.rf-grid__colhead .rf-grid__sq { margin: 0 auto 3px; display: block; }
+.rf-grid__time { font-family: var(--font-mono); font-size: 9px; color: var(--text-faint); writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; }
+.rf-grid__rowhead {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--content-bg);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  padding: 3px 8px;
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rf-grid__cell { padding: 2px; text-align: center; }
+.rf-grid__sq { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
 .rf-phase-node__gate {
   font-family: var(--font-mono);
   font-size: 9.5px;

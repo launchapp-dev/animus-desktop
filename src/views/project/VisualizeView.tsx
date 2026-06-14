@@ -20,6 +20,11 @@ import {
   type WorkflowYamlReport,
 } from "../../api/workflow_yaml";
 import { animusWorkflowRun } from "../../api/animus";
+import {
+  localWorkflowRuns,
+  type WorkflowRunSummary,
+} from "../../api/event_log";
+import { relTime, statusColor } from "./journal/model";
 import { useProjectAgentLiveStates } from "../../state/projectEvents";
 import { useActiveProject } from "../../state/activeProject";
 import type { AgentState } from "../../components/AgentFace";
@@ -264,6 +269,59 @@ function buildGraph(
   return { nodes, edges };
 }
 
+/** Airflow-style grid: runs are columns, phases are rows, cells are status
+ *  squares (colored by the run's status). A scannable run-history overview. */
+function GridOfRuns({ runs, now }: { runs: WorkflowRunSummary[]; now: number }) {
+  if (runs.length === 0) {
+    return <div className="rf-grid rf-grid--empty">No runs recorded yet.</div>;
+  }
+  const cols = runs.slice(0, 24);
+  const order: string[] = [];
+  const seen = new Set<string>();
+  for (const r of cols) for (const p of r.phases) if (!seen.has(p)) { seen.add(p); order.push(p); }
+  return (
+    <div className="rf-grid">
+      <table className="rf-grid__table">
+        <thead>
+          <tr>
+            <th className="rf-grid__corner">phase \ run</th>
+            {cols.map((r, i) => (
+              <th
+                key={i}
+                className="rf-grid__colhead"
+                title={`${r.workflowRef ?? "run"} · ${r.status}`}
+              >
+                <span className="rf-grid__sq" style={{ background: statusColor(r.status) }} />
+                <span className="rf-grid__time">
+                  {r.startedMs ? relTime(now, r.startedMs) : ""}
+                </span>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {order.map((ph) => (
+            <tr key={ph}>
+              <td className="rf-grid__rowhead" title={ph}>{ph}</td>
+              {cols.map((r, i) => (
+                <td key={i} className="rf-grid__cell">
+                  {r.phases.includes(ph) && (
+                    <span
+                      className="rf-grid__sq"
+                      style={{ background: statusColor(r.status) }}
+                      title={r.status}
+                    />
+                  )}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function VisualizeView({ project }: { project: Project }) {
   const [report, setReport] = useState<WorkflowYamlReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -271,7 +329,18 @@ export function VisualizeView({ project }: { project: Project }) {
   const [running, setRunning] = useState<string | null>(null);
   const [runMsg, setRunMsg] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [gridMode, setGridMode] = useState(false);
+  const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
+  const [now] = useState(() => Date.now());
   const agentStates = useProjectAgentLiveStates(project.id);
+
+  useEffect(() => {
+    const path = project.repo_path?.trim();
+    if (!path) return;
+    localWorkflowRuns({ repoPath: path, limit: 200 })
+      .then(setRuns)
+      .catch(() => {});
+  }, [project.repo_path]);
   const setMode = useActiveProject((s) => s.setMode);
   const liveOf = (agent: string): string | null => {
     const s = agentStates[agent];
@@ -378,11 +447,28 @@ export function VisualizeView({ project }: { project: Project }) {
           </span>
         )}
         {runMsg && (
-          <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: "auto" }}>
-            {runMsg}
-          </span>
+          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{runMsg}</span>
         )}
+        <div className="wf-seg wf-seg--sm" style={{ marginLeft: "auto" }}>
+          <button
+            type="button"
+            className={!gridMode ? "wf-seg__on" : ""}
+            onClick={() => setGridMode(false)}
+          >
+            Graph
+          </button>
+          <button
+            type="button"
+            className={gridMode ? "wf-seg__on" : ""}
+            onClick={() => setGridMode(true)}
+          >
+            Grid
+          </button>
+        </div>
       </div>
+      {gridMode ? (
+        <GridOfRuns runs={runs} now={now} />
+      ) : (
       <div className="rf-canvas">
         <ReactFlow
           nodes={nodes}
@@ -450,6 +536,7 @@ export function VisualizeView({ project }: { project: Project }) {
           </aside>
         )}
       </div>
+      )}
     </div>
   );
 }
