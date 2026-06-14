@@ -19,18 +19,32 @@ import {
   type WorkflowSummary,
   type WorkflowYamlReport,
 } from "../../api/workflow_yaml";
+import { animusWorkflowRun } from "../../api/animus";
+import { useProjectAgentLiveStates } from "../../state/projectEvents";
+import type { AgentState } from "../../components/AgentFace";
 import type { Project } from "../../types/contracts";
+
+const LIVE_COLOR: Record<string, string> = {
+  running: "var(--copper)",
+  thinking: "var(--copper)",
+  done: "var(--green)",
+  error: "var(--crimson)",
+  refusing: "var(--crimson)",
+};
 
 interface PhaseNodeData extends Record<string, unknown> {
   label: string;
   mode: string | null;
   agent: string | null;
   workflowRef: string | null;
+  liveState?: AgentState | null;
 }
 interface WorkflowNodeData extends Record<string, unknown> {
   name: string;
   id: string;
   phaseCount: number;
+  running?: boolean;
+  onRun?: () => void;
 }
 interface TriggerNodeData extends Record<string, unknown> {
   label: string;
@@ -51,16 +65,22 @@ function colorFor(mode: string | null | undefined): string {
 
 function PhaseNode({ data }: NodeProps) {
   const d = data as PhaseNodeData;
+  const live = d.liveState && d.liveState !== "idle" ? d.liveState : null;
+  const liveColor = live ? LIVE_COLOR[live] : null;
   return (
-    <div className="rf-phase-node">
+    <div
+      className={`rf-phase-node ${live ? "rf-phase-node--live" : ""}`}
+      style={liveColor ? { borderColor: liveColor } : undefined}
+    >
       <Handle type="target" position={Position.Left} className="rf-handle" />
       <div className="rf-phase-node__head">
         <span
           aria-hidden
-          className="rf-phase-node__dot"
-          style={{ background: colorFor(d.mode) }}
+          className={`rf-phase-node__dot ${live === "running" || live === "thinking" ? "rf-phase-node__dot--pulse" : ""}`}
+          style={{ background: liveColor ?? colorFor(d.mode) }}
         />
         <span className="rf-phase-node__title">{d.label}</span>
+        {live && <span className="rf-phase-node__live">{live}</span>}
       </div>
       <div className="rf-phase-node__meta">
         {d.agent && <span>@{d.agent}</span>}
@@ -82,6 +102,19 @@ function WorkflowNode({ data }: NodeProps) {
       <div className="rf-workflow-node__meta">
         {d.phaseCount} phase{d.phaseCount === 1 ? "" : "s"}
       </div>
+      {d.onRun && (
+        <button
+          type="button"
+          className="rf-workflow-node__run"
+          disabled={d.running}
+          onClick={(e) => {
+            e.stopPropagation();
+            d.onRun?.();
+          }}
+        >
+          {d.running ? "Running…" : "▶ Run"}
+        </button>
+      )}
       <Handle type="source" position={Position.Right} className="rf-handle" />
     </div>
   );
@@ -114,6 +147,9 @@ const NODE_TYPES = {
 
 function buildGraph(
   report: WorkflowYamlReport,
+  agentStates: Record<string, AgentState>,
+  runningWf: string | null,
+  onRun: (id: string) => void,
 ): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = [];
   const edges: Edge[] = [];
@@ -143,6 +179,8 @@ function buildGraph(
         name: wf.name,
         id: wf.id,
         phaseCount: wf.phases.length,
+        running: runningWf === wf.id,
+        onRun: () => onRun(wf.id),
       } as WorkflowNodeData,
     });
 
@@ -161,6 +199,7 @@ function buildGraph(
           mode: isRef ? "ref" : ps?.mode ?? null,
           agent: ps?.agent ?? null,
           workflowRef: isRef ? key : null,
+          liveState: ps?.agent ? agentStates[ps.agent] ?? null : null,
         } as PhaseNodeData,
       });
       edges.push({
@@ -228,6 +267,24 @@ export function VisualizeView({ project }: { project: Project }) {
   const [report, setReport] = useState<WorkflowYamlReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [running, setRunning] = useState<string | null>(null);
+  const [runMsg, setRunMsg] = useState<string | null>(null);
+  const agentStates = useProjectAgentLiveStates(project.id);
+
+  const runWorkflow = (id: string) => {
+    const path = project.repo_path?.trim();
+    if (!path) return;
+    setRunning(id);
+    setRunMsg(null);
+    animusWorkflowRun(path, id)
+      .then((res) => {
+        setRunMsg(
+          res.ok ? `Enqueued ${id}.` : `Run failed: ${res.rawStderr || "see logs"}`,
+        );
+      })
+      .catch((e) => setRunMsg(String(e)))
+      .finally(() => setRunning(null));
+  };
 
   useEffect(() => {
     const path = project.repo_path?.trim();
@@ -251,8 +308,9 @@ export function VisualizeView({ project }: { project: Project }) {
 
   const { nodes, edges } = useMemo(() => {
     if (!report) return { nodes: [] as Node[], edges: [] as Edge[] };
-    return buildGraph(report);
-  }, [report]);
+    return buildGraph(report, agentStates, running, runWorkflow);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [report, agentStates, running]);
 
   if (loading && !report) {
     return (
@@ -308,6 +366,11 @@ export function VisualizeView({ project }: { project: Project }) {
           <span style={{ fontSize: 11, color: "var(--crimson)" }}>
             {report.errors.length} file
             {report.errors.length === 1 ? "" : "s"} failed to parse
+          </span>
+        )}
+        {runMsg && (
+          <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: "auto" }}>
+            {runMsg}
           </span>
         )}
       </div>

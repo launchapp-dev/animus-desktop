@@ -2482,6 +2482,33 @@ a {
   color: var(--text-muted);
 }
 .rf-phase-node--gate { border-color: var(--yellow-border); }
+/* live-run light-up (Visualize) */
+.rf-phase-node--live { box-shadow: 0 0 0 1px var(--copper-bg), var(--accent-glow); }
+.rf-phase-node__live {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--copper);
+  margin-left: auto;
+}
+.rf-phase-node__dot--pulse { animation: rf-pulse 1.1s ease-in-out infinite; }
+@keyframes rf-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(217, 119, 87, 0.5); }
+  50% { box-shadow: 0 0 0 4px rgba(217, 119, 87, 0); }
+}
+.rf-workflow-node__run {
+  margin-top: 6px;
+  width: 100%;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--accent-fg);
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+  padding: 3px 0;
+  cursor: pointer;
+}
+.rf-workflow-node__run:disabled { opacity: 0.6; cursor: default; }
 .rf-phase-node__gate {
   font-family: var(--font-mono);
   font-size: 9.5px;
