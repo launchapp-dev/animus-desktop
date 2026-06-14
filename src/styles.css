@@ -2481,6 +2481,17 @@ a {
   font-size: 10.5px;
   color: var(--text-muted);
 }
+.rf-phase-node--gate { border-color: var(--yellow-border); }
+.rf-phase-node__gate {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--yellow);
+  background: var(--yellow-bg);
+  border-radius: 999px;
+  padding: 1px 6px;
+}
 
 .rf-workflow-node {
   background: var(--slate);
