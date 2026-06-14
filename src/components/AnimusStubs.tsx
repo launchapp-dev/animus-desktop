@@ -3,6 +3,7 @@
 // back to a plain code block. Payloads are model-generated, so every field
 // access is defensive and collection sizes are capped.
 
+import { Flame, Network, Sparkles } from "lucide-react";
 import AgentFace, { type AgentState } from "./AgentFace";
 import { statusTone, StatusPill } from "./AnimusJson";
 
@@ -90,7 +91,7 @@ function TeamStub({ data }: { data: Record<string, unknown> }) {
   return (
     <div className="aj ast">
       <div className="aj__head">
-        <span className="aj__icon">⛬</span>
+        <span className="aj__icon"><Network size={13} /></span>
         <span className="aj__title">{str(data.name) ?? "Team"}</span>
         <span className="aj__count">{members.length} agents</span>
       </div>
@@ -246,10 +247,12 @@ function ScorecardStub({ data }: { data: Record<string, unknown> }) {
   return (
     <div className="aj ast">
       <div className="aj__head">
-        <span className="aj__icon">✦</span>
+        <span className="aj__icon"><Sparkles size={13} /></span>
         <span className="aj__title">{str(data.title) ?? "Scorecard"}</span>
         {streak !== null && streak > 0 && (
-          <span className="ast-streak">🔥 {streak}</span>
+          <span className="ast-streak">
+            <Flame size={12} /> {streak}
+          </span>
         )}
       </div>
       {stats.length > 0 && (

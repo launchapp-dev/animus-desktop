@@ -2,6 +2,8 @@
 // results (queue listings, subject/task lists, status, secrets, plugin lists).
 // Anything we don't recognize falls through to a pretty JSON code block.
 
+import { ListTree } from "lucide-react";
+
 interface Props {
   value: unknown;
   /** Fallback renderer for unrecognized shapes (pretty JSON). */
@@ -96,7 +98,7 @@ function SubjectList({ items }: { items: Record<string, unknown>[] }) {
   return (
     <div className="aj">
       <div className="aj__head">
-        <span className="aj__icon">☰</span>
+        <span className="aj__icon"><ListTree size={13} /></span>
         <span className="aj__title">Subjects</span>
         <span className="aj__count">{items.length}</span>
       </div>

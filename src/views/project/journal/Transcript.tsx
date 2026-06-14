@@ -1,3 +1,4 @@
+import { Scale } from "lucide-react";
 import { AgentFace } from "../../../components/AgentFace";
 import { Markdown, RichText } from "../../../components/Markdown";
 import {
@@ -396,7 +397,7 @@ function DecisionLine({ evt }: { evt: NormalizedEvent }) {
   return (
     <div className="tr-row tr-row--message">
       <div className="tr-row__gutter">
-        <span className="tr-decision__glyph">⚖</span>
+        <span className="tr-decision__glyph"><Scale size={13} /></span>
       </div>
       <div className="tr-row__main">
         <div className="tr-row__meta">

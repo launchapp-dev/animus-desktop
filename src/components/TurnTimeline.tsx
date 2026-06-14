@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { Info, TriangleAlert } from "lucide-react";
 import { Markdown, RichText } from "./Markdown";
 import { AskCard } from "./AskCard";
 import { DiffView } from "./DiffView";
@@ -154,7 +155,13 @@ export function TurnTimeline({
           case "notice":
             return (
               <div key={i} className={`cx-notice cx-notice--${b.level}`}>
-                <span aria-hidden>{b.level === "error" ? "⚠" : "ℹ"}</span>
+                <span aria-hidden className="cx-notice__icon">
+                  {b.level === "error" ? (
+                    <TriangleAlert size={13} />
+                  ) : (
+                    <Info size={13} />
+                  )}
+                </span>
                 {b.text}
               </div>
             );

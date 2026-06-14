@@ -89,7 +89,10 @@ describe("AnimusStub", () => {
     expect(screen.getByText("+4")).toBeInTheDocument();
     expect(screen.getByText("Operator II")).toBeInTheDocument();
     expect(screen.getByText("120 / 200 XP")).toBeInTheDocument();
-    expect(screen.getByText("🔥 3")).toBeInTheDocument();
+    // Streak renders a Flame icon followed by the count.
+    expect(
+      document.querySelector(".ast-streak")?.textContent?.trim(),
+    ).toBe("3");
   });
 
   it("renders status tiles", () => {
