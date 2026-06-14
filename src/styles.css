@@ -7886,6 +7886,26 @@ textarea.wf-input { font-family: var(--font-mono); font-size: 11.5px; resize: ve
 .rf-node-toolbar button:hover { background: var(--bg-hover); color: var(--text); }
 .rf-node-toolbar button.rf-node-toolbar__danger:hover { color: var(--crimson); }
 .rf-phase-node--selected { border-color: var(--copper) !important; box-shadow: 0 0 0 3px var(--copper-bg-soft); }
+.rf-phase-node--issue-error { border-color: var(--crimson) !important; }
+.rf-phase-node--issue-warn { border-color: var(--yellow-border) !important; }
+.rf-phase-node__issue {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  width: 17px;
+  height: 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--accent-fg);
+  z-index: 2;
+}
+.rf-phase-node__issue--error { background: var(--crimson); }
+.rf-phase-node__issue--warn { background: var(--yellow); color: #1a1a1a; }
 /* "+" insert button on a builder edge — reveals on edge hover */
 .wf-edge-plus {
   position: absolute;
@@ -7989,6 +8009,23 @@ textarea.wf-input { font-family: var(--font-mono); font-size: 11.5px; resize: ve
   padding: 12px 10px;
   overflow-y: auto;
 }
+.wf-pal-head { display: flex; align-items: center; justify-content: space-between; }
+.wf-pal-collapse {
+  width: 20px; height: 20px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 6px; color: var(--text-faint); cursor: pointer; font-size: 14px;
+}
+.wf-pal-collapse:hover { background: var(--bg-hover); color: var(--text); }
+.wf-builder__palette-tab {
+  flex-shrink: 0;
+  width: 28px;
+  border-right: var(--hairline) solid var(--border);
+  color: var(--copper);
+  font-size: 16px;
+  cursor: pointer;
+  background: var(--surface-1);
+}
+.wf-builder__palette-tab:hover { background: var(--surface-2); }
 .wf-pal-section { display: flex; flex-direction: column; gap: 6px; }
 .wf-pal-section--grow { flex: 1; min-height: 0; }
 .wf-pal-list { display: flex; flex-direction: column; gap: 3px; overflow-y: auto; }

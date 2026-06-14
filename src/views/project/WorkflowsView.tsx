@@ -108,6 +108,7 @@ function BuildNode({ data, selected }: NodeProps) {
     mode: string | null;
     agent: string | null;
     gate?: boolean;
+    issue?: "error" | "warn" | null;
     onRemove: () => void;
     onConfig: () => void;
   };
@@ -123,8 +124,17 @@ function BuildNode({ data, selected }: NodeProps) {
     <div
       className={`rf-phase-node ${d.gate ? "rf-phase-node--gate" : ""} ${
         selected ? "rf-phase-node--selected" : ""
-      }`}
+      } ${d.issue ? `rf-phase-node--issue-${d.issue}` : ""}`}
     >
+      {d.issue && (
+        <span
+          className={`rf-phase-node__issue rf-phase-node__issue--${d.issue}`}
+          title={d.issue === "error" ? "Has a blocking issue" : "Has a warning"}
+          aria-hidden
+        >
+          {d.issue === "error" ? "!" : "?"}
+        </span>
+      )}
       <NodeToolbar position={Position.Top} offset={8} className="rf-node-toolbar">
         <button
           type="button"
@@ -313,6 +323,7 @@ function WorkflowCanvas({
   phases,
   setPhases,
   phaseInfo,
+  phaseIssues,
   availablePhases,
   reworkTargets,
   onInsert,
@@ -322,6 +333,7 @@ function WorkflowCanvas({
   phases: string[];
   setPhases: (next: string[]) => void;
   phaseInfo: PhaseInfo;
+  phaseIssues?: Record<string, "error" | "warn">;
   availablePhases: string[];
   reworkTargets: Record<string, string>;
   onInsert: (index: number, phaseId: string) => void;
@@ -370,12 +382,13 @@ function WorkflowCanvas({
           mode: phaseInfo[p]?.mode ?? null,
           agent: phaseInfo[p]?.agent ?? null,
           gate: phaseInfo[p]?.gate ?? false,
+          issue: phaseIssues?.[p] ?? null,
           onRemove: () => setPhases(phases.filter((x) => x !== p)),
           onConfig: () => onSelectPhase(p),
         },
       })),
     );
-  }, [phases, phaseInfo, setNodes, setPhases, onSelectPhase]);
+  }, [phases, phaseInfo, phaseIssues, setNodes, setPhases, onSelectPhase]);
 
   const edges = phases.slice(1).map((p, i) => ({
     id: `${phases[i]}->${p}`,
@@ -1225,6 +1238,16 @@ function WorkflowComposer({
     [id, phases, phaseInfo, agents, existingWorkflows],
   );
   const lintErrors = lint.filter((l) => l.level === "error");
+  // Per-phase issue level for on-node badges (error wins over warn).
+  const phaseIssues = useMemo(() => {
+    const m: Record<string, "error" | "warn"> = {};
+    for (const l of lint) {
+      if (!l.phase) continue;
+      if (l.level === "error" || !m[l.phase]) m[l.phase] = l.level;
+    }
+    return m;
+  }, [lint]);
+  const [paletteOpen, setPaletteOpen] = useState(true);
 
   const addPhase = (p: string) => {
     if (p && !phases.includes(p)) setPhases((prev) => [...prev, p]);
@@ -1336,7 +1359,31 @@ function WorkflowComposer({
       </div>
 
       <div className="wf-builder__main">
+        {!paletteOpen && (
+          <button
+            type="button"
+            className="wf-builder__palette-tab"
+            onClick={() => setPaletteOpen(true)}
+            title="Show phases & templates"
+            aria-label="Show palette"
+          >
+            +
+          </button>
+        )}
+        {paletteOpen && (
         <aside className="wf-builder__palette">
+          <div className="wf-pal-head">
+            <span className="wf-compose__label" style={{ margin: 0 }}>Library</span>
+            <button
+              type="button"
+              className="wf-pal-collapse"
+              onClick={() => setPaletteOpen(false)}
+              title="Collapse palette"
+              aria-label="Collapse palette"
+            >
+              ‹
+            </button>
+          </div>
           {phases.length === 0 && templates.length > 0 && (
             <div className="wf-pal-section">
               <span className="wf-compose__label">Templates</span>
@@ -1387,12 +1434,14 @@ function WorkflowComposer({
             </button>
           </div>
         </aside>
+        )}
 
         <div className="wf-builder__canvas">
           <WorkflowCanvas
             phases={phases}
             setPhases={setPhases}
             phaseInfo={phaseInfo}
+            phaseIssues={phaseIssues}
             availablePhases={pickable}
             reworkTargets={reworkTargets}
             onInsert={insertPhaseAt}
