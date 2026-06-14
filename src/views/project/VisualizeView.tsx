@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, Play } from "lucide-react";
+import { Code2, Loader2, Play } from "lucide-react";
 import {
   Background,
   BackgroundVariant,
@@ -16,6 +16,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import {
   invalidateLocalWorkflowsCache,
+  localWorkflowFileRead,
   localWorkflowsRead,
   type BranchRoute,
   type PhaseSummary,
@@ -731,6 +732,8 @@ export function VisualizeView({ project }: { project: Project }) {
   const [view, setView] = useState<"graph" | "gantt" | "grid">("graph");
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
   const [overlayRun, setOverlayRun] = useState<string | null>(null);
+  const [sourceWf, setSourceWf] = useState<WorkflowSummary | null>(null);
+  const [sourceText, setSourceText] = useState<string | null>(null);
   const [now] = useState(() => Date.now());
   const agentStates = useProjectAgentLiveStates(project.id);
 
@@ -807,6 +810,24 @@ export function VisualizeView({ project }: { project: Project }) {
       .then(setReport)
       .catch((e) => setError(String(e)));
   };
+
+  // Load the YAML source for the workflow whose node was clicked — the canvas↔
+  // YAML pairing (read-only; the canvas is a projection of this file).
+  useEffect(() => {
+    const path = project.repo_path?.trim();
+    if (!sourceWf || !path) {
+      setSourceText(null);
+      return;
+    }
+    let cancelled = false;
+    setSourceText("Loading…");
+    localWorkflowFileRead(path, sourceWf.sourceFile)
+      .then((t) => !cancelled && setSourceText(t))
+      .catch((e) => !cancelled && setSourceText(`Couldn't read source: ${String(e)}`));
+    return () => {
+      cancelled = true;
+    };
+  }, [sourceWf, project.repo_path]);
 
   const selectedPhase = report?.phases.find((p) => p.id === selected) ?? null;
 
@@ -962,6 +983,10 @@ export function VisualizeView({ project }: { project: Project }) {
             if (node.type === "phase") {
               const d = node.data as PhaseNodeData;
               setSelected(typeof d.label === "string" ? d.label : null);
+            } else if (node.type === "workflow") {
+              const d = node.data as WorkflowNodeData;
+              const wf = report.workflows.find((w) => w.id === d.id) ?? null;
+              setSourceWf(wf);
             }
           }}
           fitView
@@ -1085,6 +1110,29 @@ export function VisualizeView({ project }: { project: Project }) {
                     builder.
                   </p>
                 ))}
+            </div>
+          </aside>
+        )}
+        {sourceWf && (
+          <aside className="wf-cfg wf-cfg--source">
+            <header className="wf-cfg__head">
+              <span className="wf-cfg__title">
+                <Code2 size={13} /> {sourceWf.id}.yaml
+              </span>
+              <button
+                type="button"
+                className="wf-cfg__x"
+                onClick={() => setSourceWf(null)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </header>
+            <div className="wf-cfg__body">
+              <p className="aj-muted" style={{ fontSize: 11, margin: 0 }}>
+                {sourceWf.sourceFile} — the canvas is a projection of this file.
+              </p>
+              <pre className="wf-source">{sourceText ?? ""}</pre>
             </div>
           </aside>
         )}

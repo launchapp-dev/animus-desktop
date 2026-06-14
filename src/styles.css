@@ -2586,6 +2586,22 @@ a {
   padding: 1px 6px;
   z-index: 2;
 }
+.wf-cfg--source { width: 360px; }
+.wf-cfg__title { display: inline-flex; align-items: center; gap: 6px; }
+.wf-source {
+  margin: 8px 0 0;
+  padding: 10px;
+  background: var(--surface-1);
+  border: var(--hairline) solid var(--border);
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre;
+  overflow: auto;
+  max-height: calc(100% - 40px);
+}
 .wf-cfg__chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .wf-cfg__chip {
   font-family: var(--font-mono);
