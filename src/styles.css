@@ -2601,6 +2601,9 @@ a {
   background: var(--yellow-bg);
   border-radius: 999px;
   padding: 1px 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
 
 .rf-workflow-node {
@@ -7643,19 +7646,31 @@ textarea.wf-input { font-family: var(--font-mono); font-size: 11.5px; resize: ve
   font-size: 12px;
   color: var(--text-faint);
 }
-.rf-build-node__rm {
-  margin-left: auto;
-  width: 16px;
-  height: 16px;
+/* Hover-reveal node toolbar (builder phase nodes) */
+.rf-node-toolbar {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--surface-2);
+  border: var(--hairline) solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-1, 0 4px 12px rgba(0, 0, 0, 0.3));
+}
+.rf-node-toolbar button {
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
-  font-size: 13px;
+  border-radius: 6px;
   color: var(--text-faint);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out);
 }
-.rf-build-node__rm:hover { background: var(--bg-hover); color: var(--crimson); }
-/* "+" insert button on a builder edge */
+.rf-node-toolbar button:hover { background: var(--bg-hover); color: var(--text); }
+.rf-node-toolbar button.rf-node-toolbar__danger:hover { color: var(--crimson); }
+.rf-phase-node--selected { border-color: var(--copper) !important; box-shadow: 0 0 0 1px var(--copper); }
+/* "+" insert button on a builder edge — reveals on edge hover */
 .wf-edge-plus {
   position: absolute;
   width: 18px;
@@ -7671,8 +7686,12 @@ textarea.wf-input { font-family: var(--font-mono); font-size: 11.5px; resize: ve
   line-height: 1;
   cursor: pointer;
   pointer-events: all;
-  transition: transform var(--motion-fast) var(--ease-out), background var(--motion-fast) var(--ease-out);
+  opacity: 0;
+  transition: transform var(--motion-fast) var(--ease-out), background var(--motion-fast) var(--ease-out), opacity var(--motion-fast) var(--ease-out);
 }
+.react-flow__edge:hover .wf-edge-plus,
+.wf-edge-plus:hover,
+.wf-edge-plus:focus-visible { opacity: 1; }
 .wf-edge-plus:hover { background: var(--copper); color: var(--accent-fg); }
 /* Insert-phase chooser popover (fixed at click position) */
 .wf-chooser__backdrop { position: fixed; inset: 0; z-index: 60; }

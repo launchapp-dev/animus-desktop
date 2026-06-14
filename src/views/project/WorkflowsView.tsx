@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { GitBranch, Settings2, Trash2 } from "lucide-react";
 import {
   localWorkflowsRead,
   localWorkflowFileRead,
@@ -33,6 +34,7 @@ import {
   Handle,
   MarkerType,
   MiniMap,
+  NodeToolbar,
   Panel,
   Position,
   ReactFlow,
@@ -100,13 +102,14 @@ function lintWorkflow(
 
 /** A draggable phase node for the visual builder. Order is derived from
  *  horizontal position, so dragging left/right reorders the workflow. */
-function BuildNode({ data }: NodeProps) {
+function BuildNode({ data, selected }: NodeProps) {
   const d = data as {
     label: string;
     mode: string | null;
     agent: string | null;
     gate?: boolean;
     onRemove: () => void;
+    onConfig: () => void;
   };
   const dot =
     d.mode === "agent"
@@ -117,27 +120,45 @@ function BuildNode({ data }: NodeProps) {
           ? "var(--yellow)"
           : "var(--copper)";
   return (
-    <div className={`rf-phase-node ${d.gate ? "rf-phase-node--gate" : ""}`}>
+    <div
+      className={`rf-phase-node ${d.gate ? "rf-phase-node--gate" : ""} ${
+        selected ? "rf-phase-node--selected" : ""
+      }`}
+    >
+      <NodeToolbar position={Position.Top} offset={8} className="rf-node-toolbar">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            d.onConfig();
+          }}
+          title="Configure phase"
+          aria-label="Configure phase"
+        >
+          <Settings2 size={13} />
+        </button>
+        <button
+          type="button"
+          className="rf-node-toolbar__danger"
+          onClick={(e) => {
+            e.stopPropagation();
+            d.onRemove();
+          }}
+          title="Remove phase"
+          aria-label="Remove phase"
+        >
+          <Trash2 size={13} />
+        </button>
+      </NodeToolbar>
       <Handle type="target" position={Position.Left} className="rf-handle" />
       <div className="rf-phase-node__head">
         <span aria-hidden className="rf-phase-node__dot" style={{ background: dot }} />
         <span className="rf-phase-node__title">{d.label}</span>
         {d.gate && (
           <span className="rf-phase-node__gate" title="Decision gate (approve / rework)">
-            ⟐ gate
+            <GitBranch size={10} /> gate
           </span>
         )}
-        <button
-          type="button"
-          className="rf-build-node__rm"
-          onClick={(e) => {
-            e.stopPropagation();
-            d.onRemove();
-          }}
-          aria-label="Remove phase"
-        >
-          ×
-        </button>
       </div>
       <div className="rf-phase-node__meta">
         {d.agent && <span>@{d.agent}</span>}
@@ -233,10 +254,11 @@ function WorkflowCanvas({
           agent: phaseInfo[p]?.agent ?? null,
           gate: phaseInfo[p]?.gate ?? false,
           onRemove: () => setPhases(phases.filter((x) => x !== p)),
+          onConfig: () => onSelectPhase(p),
         },
       })),
     );
-  }, [phases, phaseInfo, setNodes, setPhases]);
+  }, [phases, phaseInfo, setNodes, setPhases, onSelectPhase]);
 
   const edges = phases.slice(1).map((p, i) => ({
     id: `${phases[i]}->${p}`,
@@ -319,6 +341,8 @@ function WorkflowCanvas({
         proOptions={{ hideAttribution: true }}
         nodesConnectable
         edgesFocusable={false}
+        snapToGrid
+        snapGrid={[26, 26]}
       >
         <Panel position="top-left">
           <button
