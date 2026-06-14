@@ -65,6 +65,16 @@ export function SubjectsView({ project }: { project: Project }) {
   const [cBody, setCBody] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
 
+  // Bulk import
+  const [showImport, setShowImport] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importBusy, setImportBusy] = useState(false);
+  const [importProgress, setImportProgress] = useState<{
+    done: number;
+    total: number;
+    failed: number;
+  } | null>(null);
+
   const path = project.repo_path?.trim() || undefined;
 
   // Last-issued-wins token: `subjectList` shells out to the animus CLI and a
@@ -173,6 +183,104 @@ export function SubjectsView({ project }: { project: Project }) {
     }
   }
 
+  // Accepts a JSON array of objects ({title, priority?, labels?, body?,
+  // status?}), a single JSON object, or plain text — one title per line.
+  // labels may be a string or string[]. Anything without a title is skipped.
+  function parseImport(text: string): {
+    rows: {
+      title: string;
+      priority?: string;
+      labels?: string;
+      body?: string;
+      status?: string;
+    }[];
+    error: string | null;
+  } {
+    const trimmed = text.trim();
+    if (!trimmed) return { rows: [], error: null };
+    const norm = (o: Record<string, unknown>) => {
+      const title = typeof o.title === "string" ? o.title.trim() : "";
+      if (!title) return null;
+      const labels = Array.isArray(o.labels)
+        ? o.labels.map(String).join(",")
+        : typeof o.labels === "string"
+          ? o.labels
+          : undefined;
+      return {
+        title,
+        priority: typeof o.priority === "string" ? o.priority : undefined,
+        labels,
+        body: typeof o.body === "string" ? o.body : undefined,
+        status: typeof o.status === "string" ? o.status : undefined,
+      };
+    };
+    if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        const arr = Array.isArray(parsed) ? parsed : [parsed];
+        const rows = arr
+          .filter((x) => x && typeof x === "object")
+          .map((x) => norm(x as Record<string, unknown>))
+          .filter((x): x is NonNullable<typeof x> => x !== null);
+        return { rows, error: null };
+      } catch (e) {
+        return { rows: [], error: `Invalid JSON: ${String(e)}` };
+      }
+    }
+    const rows = trimmed
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((title) => ({ title }));
+    return { rows, error: null };
+  }
+
+  const importPreview = useMemo(() => parseImport(importText), [importText]);
+
+  async function handleImport() {
+    if (!path) return;
+    const { rows, error: perr } = importPreview;
+    if (perr) {
+      setError(perr);
+      return;
+    }
+    if (rows.length === 0) return;
+    setImportBusy(true);
+    setError(null);
+    let done = 0;
+    let failed = 0;
+    setImportProgress({ done: 0, total: rows.length, failed: 0 });
+    for (const row of rows) {
+      try {
+        const res = await subjectCreate(
+          {
+            kind,
+            title: row.title,
+            priority: row.priority || "p2",
+            labels: row.labels ?? "",
+            body: row.body ?? "",
+            status: row.status,
+          },
+          path,
+        );
+        if (!res.ok) failed += 1;
+      } catch {
+        failed += 1;
+      }
+      done += 1;
+      setImportProgress({ done, total: rows.length, failed });
+    }
+    setImportBusy(false);
+    if (failed === 0) {
+      setImportText("");
+      setShowImport(false);
+      setImportProgress(null);
+    } else {
+      setError(`${failed} of ${rows.length} ${kind}s failed to import.`);
+    }
+    await refreshRef.current();
+  }
+
   async function handleStatus(s: Subject, status: string) {
     if (!path || status === s.status) return;
     setBusyId(s.id);
@@ -222,6 +330,17 @@ export function SubjectsView({ project }: { project: Project }) {
             disabled={loading || !path}
           >
             {showCreate ? "Cancel" : "+ New subject"}
+          </button>
+          <button
+            type="button"
+            className="plugins-pane__ghost"
+            onClick={() => {
+              setShowImport((s) => !s);
+              setShowCreate(false);
+            }}
+            disabled={loading || !path}
+          >
+            {showImport ? "Cancel" : "Import"}
           </button>
           <button
             type="button"
@@ -354,6 +473,65 @@ export function SubjectsView({ project }: { project: Project }) {
             >
               {createBusy ? "Creating…" : `Create ${kind}`}
             </button>
+          </div>
+        </section>
+      )}
+
+      {showImport && (
+        <section className="secret-form">
+          <label className="secret-form__row secret-form__row--stack">
+            <span className="secret-form__label">
+              Bulk import into <code>{kind}</code>
+            </span>
+            <textarea
+              className="plugins-pane__search subjects-textarea subjects-import__area"
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+              placeholder={
+                'One title per line, or a JSON array:\n[{"title":"Ship auth","priority":"p1","labels":["backend"]}]'
+              }
+              rows={8}
+              spellCheck={false}
+            />
+          </label>
+          <div className="subjects-import__foot">
+            <span className="subjects-import__count">
+              {importPreview.error ? (
+                <span className="subjects-import__err">{importPreview.error}</span>
+              ) : importProgress ? (
+                `Imported ${importProgress.done}/${importProgress.total}` +
+                (importProgress.failed ? ` · ${importProgress.failed} failed` : "")
+              ) : (
+                `${importPreview.rows.length} ${kind}${importPreview.rows.length === 1 ? "" : "s"} ready`
+              )}
+            </span>
+            <div className="card__actions" style={{ marginTop: 0 }}>
+              <button
+                type="button"
+                className="plugins-pane__ghost"
+                onClick={() => {
+                  setShowImport(false);
+                  setImportProgress(null);
+                }}
+                disabled={importBusy}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="workflow-row__run"
+                onClick={() => void handleImport()}
+                disabled={
+                  importBusy ||
+                  importPreview.rows.length === 0 ||
+                  importPreview.error !== null
+                }
+              >
+                {importBusy
+                  ? `Importing… ${importProgress?.done ?? 0}/${importProgress?.total ?? 0}`
+                  : `Import ${importPreview.rows.length || ""}`.trim()}
+              </button>
+            </div>
           </div>
         </section>
       )}
