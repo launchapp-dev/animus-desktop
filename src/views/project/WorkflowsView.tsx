@@ -207,6 +207,105 @@ function InsertEdge(props: EdgeProps) {
 
 const BUILD_EDGE_TYPES = { insert: InsertEdge };
 
+/** Searchable, keyboard-navigable phase picker used by the +/drop/⌘K add
+ *  affordances. Filters the unused-phase list; Enter picks the top hit (or
+ *  creates a new phase when the query matches nothing). */
+function PhasePicker({
+  unused,
+  position,
+  onPick,
+  onNew,
+  onClose,
+}: {
+  unused: string[];
+  position: { x: number; y: number; centered?: boolean };
+  onPick: (id: string) => void;
+  onNew: () => void;
+  onClose: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const [active, setActive] = useState(0);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const matches = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return unused;
+    return unused.filter((p) => p.toLowerCase().includes(needle));
+  }, [q, unused]);
+
+  useEffect(() => {
+    setActive(0);
+  }, [q]);
+
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      onClose();
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActive((a) => Math.min(matches.length, a + 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive((a) => Math.max(0, a - 1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (active < matches.length && matches[active]) onPick(matches[active]!);
+      else onNew();
+    }
+  };
+
+  const style = position.centered
+    ? { left: "50%", top: "16%", transform: "translateX(-50%)" }
+    : { left: position.x, top: position.y };
+
+  return (
+    <>
+      <div className="wf-chooser__backdrop" onClick={onClose} />
+      <div className="wf-chooser wf-chooser--search" style={style} role="dialog">
+        <input
+          ref={inputRef}
+          className="wf-chooser__search"
+          placeholder="Search phases…  ↑↓ then ⏎"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={onKey}
+          spellCheck={false}
+        />
+        <div className="wf-chooser__list">
+          {matches.length === 0 ? (
+            <div className="wf-chooser__empty">
+              {unused.length === 0 ? "All phases already added" : "No match"}
+            </div>
+          ) : (
+            matches.map((p, i) => (
+              <button
+                key={p}
+                type="button"
+                className={`wf-chooser__item ${i === active ? "wf-chooser__item--active" : ""}`}
+                onMouseEnter={() => setActive(i)}
+                onClick={() => onPick(p)}
+              >
+                {p}
+              </button>
+            ))
+          )}
+        </div>
+        <button
+          type="button"
+          className={`wf-chooser__new ${active >= matches.length ? "wf-chooser__item--active" : ""}`}
+          onClick={onNew}
+        >
+          + New phase{q.trim() ? ` "${q.trim()}"` : ""}
+        </button>
+      </div>
+    </>
+  );
+}
+
 /** Visual (React Flow) workflow builder: phases laid out left→right; drag a
  *  node to reorder (order = x-position), × to remove. Reflects/writes the
  *  composer's ordered `phases` array. */
@@ -230,10 +329,28 @@ function WorkflowCanvas({
   onSelectPhase: (id: string) => void;
 }) {
   const [nodes, setNodes, onNodesChange] = useNodesState<RfNode>([]);
-  const [chooser, setChooser] = useState<{ index: number; x: number; y: number } | null>(
-    null,
-  );
+  const [chooser, setChooser] = useState<{
+    index: number;
+    x: number;
+    y: number;
+    centered?: boolean;
+  } | null>(null);
   const [rf, setRf] = useState<ReactFlowInstance | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  // ⌘K / Ctrl-K opens the add-phase picker (append at the end) while the
+  // builder canvas is in view — keyboard-first, shared with the +/drop picker.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        if (!wrapRef.current?.isConnected) return;
+        e.preventDefault();
+        setChooser({ index: phases.length, x: 0, y: 0, centered: true });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [phases.length]);
 
   // Keep the chain in view as phases are added/removed.
   useEffect(() => {
@@ -316,7 +433,7 @@ function WorkflowCanvas({
     );
   }
   return (
-    <div className="wf-canvas">
+    <div className="wf-canvas" ref={wrapRef}>
       <ReactFlow
         nodes={nodes}
         edges={allEdges}
@@ -363,41 +480,19 @@ function WorkflowCanvas({
         <MiniMap pannable zoomable nodeColor="var(--copper)" nodeStrokeWidth={0} />
       </ReactFlow>
       {chooser && (
-        <>
-          <div className="wf-chooser__backdrop" onClick={() => setChooser(null)} />
-          <div className="wf-chooser" style={{ left: chooser.x, top: chooser.y }} role="menu">
-            <div className="wf-chooser__title">Insert phase</div>
-            <div className="wf-chooser__list">
-              {unused.length === 0 ? (
-                <div className="wf-chooser__empty">All phases already added</div>
-              ) : (
-                unused.map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    className="wf-chooser__item"
-                    onClick={() => {
-                      onInsert(chooser.index, p);
-                      setChooser(null);
-                    }}
-                  >
-                    {p}
-                  </button>
-                ))
-              )}
-            </div>
-            <button
-              type="button"
-              className="wf-chooser__new"
-              onClick={() => {
-                onNewPhaseAt(chooser.index);
-                setChooser(null);
-              }}
-            >
-              + New phase
-            </button>
-          </div>
-        </>
+        <PhasePicker
+          unused={unused}
+          position={chooser}
+          onPick={(p) => {
+            onInsert(chooser.index, p);
+            setChooser(null);
+          }}
+          onNew={() => {
+            onNewPhaseAt(chooser.index);
+            setChooser(null);
+          }}
+          onClose={() => setChooser(null)}
+        />
       )}
     </div>
   );
