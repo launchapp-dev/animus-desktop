@@ -8038,6 +8038,44 @@ textarea.wf-input { font-family: var(--font-mono); font-size: 11.5px; resize: ve
 .wf-review__warn { font-size: 11px; color: var(--brass); }
 .wf-review__note { margin: 2px 0 0; font-size: 10.5px; line-height: 1.5; color: var(--text-faint); }
 .wf-review__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+/* Directive field with var chips + expand-to-fullscreen */
+.wf-directive { display: flex; flex-direction: column; gap: 4px; }
+.wf-directive__bar { display: flex; align-items: center; gap: 8px; }
+.wf-directive__vars { flex: 1; display: flex; flex-wrap: wrap; gap: 3px; min-width: 0; }
+.wf-directive__var {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 999px;
+  color: var(--copper);
+  background: var(--copper-bg-soft);
+  border: var(--hairline) solid var(--copper);
+}
+.wf-directive__hint { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); }
+.wf-directive__expand {
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 6px; color: var(--text-faint); cursor: pointer; flex-shrink: 0;
+}
+.wf-directive__expand:hover { background: var(--bg-hover); color: var(--copper); }
+.wf-directive__modal {
+  position: fixed;
+  top: 8%; left: 50%;
+  transform: translateX(-50%);
+  z-index: 71;
+  width: min(720px, 86vw);
+  height: 72vh;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  background: var(--surface-2);
+  border: var(--hairline) solid var(--border-strong);
+  border-radius: 14px;
+  box-shadow: var(--shadow-2);
+}
+.wf-directive__modal-head { display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 600; color: var(--text); }
+.wf-directive__modal-area { flex: 1; resize: none; font-size: 13px; line-height: 1.55; }
 .wf-builder__lintchip { font-size: 11px; padding: 2px 9px; border-radius: 999px; }
 .wf-builder__lintchip--err { color: var(--crimson); background: var(--red-bg); }
 .wf-builder__main { flex: 1; min-height: 0; display: flex; }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { GitBranch, Settings2, Trash2 } from "lucide-react";
+import { GitBranch, Maximize2, Settings2, Trash2 } from "lucide-react";
 import {
   localWorkflowsRead,
   localWorkflowFileRead,
@@ -212,6 +212,91 @@ function InsertEdge(props: EdgeProps) {
         </button>
       </EdgeLabelRenderer>
     </>
+  );
+}
+
+const VAR_RE = /\{\{\s*([\w.]+)\s*\}\}/g;
+
+/** Directive text field: compact textarea + expand-to-fullscreen focused editor,
+ *  plus a chip count of the `{{dispatch_input}}` variables it references. */
+function DirectiveField({
+  value,
+  onChange,
+  rows = 4,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  rows?: number;
+  placeholder?: string;
+}) {
+  const [full, setFull] = useState(false);
+  const vars = useMemo(
+    () => [...new Set([...value.matchAll(VAR_RE)].map((m) => m[1]!))],
+    [value],
+  );
+  return (
+    <div className="wf-directive">
+      <div className="wf-directive__bar">
+        <span className="wf-directive__vars">
+          {vars.length > 0 ? (
+            vars.map((v) => (
+              <span key={v} className="wf-directive__var">{`{{${v}}}`}</span>
+            ))
+          ) : (
+            <span className="wf-directive__hint">reference run inputs with {"{{var}}"}</span>
+          )}
+        </span>
+        <button
+          type="button"
+          className="wf-directive__expand"
+          onClick={() => setFull(true)}
+          title="Expand editor"
+          aria-label="Expand directive editor"
+        >
+          <Maximize2 size={12} />
+        </button>
+      </div>
+      <textarea
+        className="wf-input"
+        rows={rows}
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      {full && (
+        <>
+          <div className="wf-review__backdrop" onClick={() => setFull(false)} />
+          <div className="wf-directive__modal" role="dialog">
+            <div className="wf-directive__modal-head">
+              <span>Directive</span>
+              <button
+                type="button"
+                className="wf-cfg__x"
+                onClick={() => setFull(false)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <textarea
+              className="wf-input wf-directive__modal-area"
+              value={value}
+              placeholder={placeholder}
+              onChange={(e) => onChange(e.target.value)}
+              autoFocus
+            />
+            {vars.length > 0 && (
+              <div className="wf-directive__vars">
+                {vars.map((v) => (
+                  <span key={v} className="wf-directive__var">{`{{${v}}}`}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -735,12 +820,7 @@ function PhaseConfigPanel({
               </label>
               <label className="wf-field">
                 <span>Directive</span>
-                <textarea
-                  className="wf-input"
-                  rows={6}
-                  value={directive}
-                  onChange={(e) => setDirective(e.target.value)}
-                />
+                <DirectiveField value={directive} onChange={setDirective} rows={6} />
               </label>
               <label className="wf-check">
                 <input
@@ -1127,12 +1207,11 @@ function PhaseComposer({
           )}
           <label className="wf-field">
             <span>Directive</span>
-            <textarea
-              className="wf-input"
+            <DirectiveField
+              value={directive}
+              onChange={setDirective}
               rows={3}
               placeholder="What should this agent do in this phase?"
-              value={directive}
-              onChange={(e) => setDirective(e.target.value)}
             />
           </label>
           <label className="wf-check">
