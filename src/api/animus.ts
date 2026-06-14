@@ -409,12 +409,35 @@ export function animusWorkflowResume(
   });
 }
 
+export interface CostSummary {
+  since: string;
+  total_tokens: number;
+  total_cost_usd: number;
+  active_workflows: number;
+  completed_workflows: number;
+  top_workflows: { workflow_run_id?: string; cost_usd?: number; tokens?: number }[];
+}
+
+/** Aggregate token + USD spend over a window (default 24h). */
+export function animusCostSummary(
+  path: string,
+  since?: string,
+): Promise<AnimusCliResult<CostSummary>> {
+  return invoke<AnimusCliResult<CostSummary>>("animus_cost_summary", {
+    path,
+    since: since ?? null,
+  });
+}
+
 /** Per-phase token + USD cost for a workflow run id. */
 export function animusCostWorkflow(
   path: string,
   runId: string,
-): Promise<AnimusCliResult<unknown>> {
-  return invoke<AnimusCliResult<unknown>>("animus_cost_workflow", { path, runId });
+): Promise<AnimusCliResult<{ total_cost_usd?: number; total_tokens?: number }>> {
+  return invoke<AnimusCliResult<{ total_cost_usd?: number; total_tokens?: number }>>(
+    "animus_cost_workflow",
+    { path, runId },
+  );
 }
 
 // --- Interactions (questions + approvals; animus >= 0.5.15) ------------------

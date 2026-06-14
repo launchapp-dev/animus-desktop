@@ -15,7 +15,13 @@ import {
   type WorkflowRunSummary,
   type HistoricalEvent,
 } from "../../api/event_log";
-import { animusPhaseGate, animusWorkflowResume } from "../../api/animus";
+import {
+  animusPhaseGate,
+  animusWorkflowResume,
+  animusCostSummary,
+  animusCostWorkflow,
+  type CostSummary,
+} from "../../api/animus";
 import type { Project } from "../../types/contracts";
 import {
   ALL_CATS,
@@ -322,6 +328,24 @@ function RunDetail({
     run.startedTs && run.endedTs
       ? Date.parse(run.endedTs) - Date.parse(run.startedTs)
       : null;
+  const [cost, setCost] = useState<{ usd: number; tokens: number } | null>(null);
+  useEffect(() => {
+    setCost(null);
+    if (!repoPath || !run.wfUuid) return;
+    let live = true;
+    animusCostWorkflow(repoPath, run.wfUuid)
+      .then((res) => {
+        if (!live || !res.ok || !res.data) return;
+        const d = res.data;
+        if (typeof d.total_cost_usd === "number" || typeof d.total_tokens === "number") {
+          setCost({ usd: d.total_cost_usd ?? 0, tokens: d.total_tokens ?? 0 });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [repoPath, run.wfUuid]);
   return (
     <div className="rundetail">
       <header className="rundetail__head">
@@ -365,6 +389,11 @@ function RunDetail({
         {run.errorCount > 0 && (
           <span style={{ color: "var(--crimson)" }}>{run.errorCount} errors</span>
         )}
+        {cost && (
+          <span className="rundetail__cost" title="Token + USD cost for this run">
+            ${cost.usd.toFixed(4)} · {cost.tokens.toLocaleString()} tok
+          </span>
+        )}
         <code className="rundetail__runid">{run.wfUuid}</code>
       </div>
       {run.status === "paused" && repoPath && (
@@ -396,7 +425,22 @@ export function JournalView({ project }: { project: Project }) {
   const bucket = useProjectEventsBucket(project.id);
   const [now, setNow] = useState(() => Date.now());
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
+  const [costSummary, setCostSummary] = useState<CostSummary | null>(null);
   const [loadingRuns, setLoadingRuns] = useState(false);
+
+  useEffect(() => {
+    const path = project.repo_path?.trim();
+    if (!path) return;
+    let live = true;
+    animusCostSummary(path, "7d")
+      .then((res) => {
+        if (live && res.ok && res.data) setCostSummary(res.data);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [project.repo_path]);
   const [agentByPhase, setAgentByPhaseLocal] = useState<Record<string, string>>({});
   const [search, setSearch] = useState("");
   const [agentFilter, setAgentFilter] = useState("all");
@@ -560,6 +604,17 @@ export function JournalView({ project }: { project: Project }) {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
+          {costSummary && (costSummary.total_tokens > 0 || costSummary.completed_workflows > 0) && (
+            <div className="journal-cost" title="Spend over the last 7 days">
+              <span className="journal-cost__usd">
+                ${Math.max(0, costSummary.total_cost_usd).toFixed(2)}
+              </span>
+              <span className="journal-cost__meta">
+                {costSummary.total_tokens.toLocaleString()} tok ·{" "}
+                {costSummary.completed_workflows} runs · 7d
+              </span>
+            </div>
+          )}
         </div>
         <div className="journal-master__filters">
           {(["all", "completed", "failed"] as RunStatusFilter[]).map((s) => (

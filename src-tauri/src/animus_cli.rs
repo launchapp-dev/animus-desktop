@@ -607,6 +607,21 @@ pub async fn animus_workflow_resume(
     run_animus_json(&path, &args).await
 }
 
+/// Aggregate token + USD spend over a window (default 24h).
+#[tauri::command]
+pub async fn animus_cost_summary(
+    path: String,
+    since: Option<String>,
+) -> Result<AnimusCliResult, String> {
+    let mut args: Vec<&str> = vec!["cost", "summary"];
+    let since = since.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    if let Some(s) = since {
+        args.push("--since");
+        args.push(s);
+    }
+    run_animus_json(&path, &args).await
+}
+
 /// Per-phase token + USD cost breakdown for a single workflow run id.
 #[tauri::command]
 pub async fn animus_cost_workflow(

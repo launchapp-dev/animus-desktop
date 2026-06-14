@@ -7783,6 +7783,17 @@ textarea.wf-input { font-family: var(--font-mono); font-size: 11.5px; resize: ve
 .wf-template__desc { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
 .wf-template__phases { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); }
 
+/* Journal cost surfaces */
+.journal-cost {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 4px 0;
+}
+.journal-cost__usd { font-family: var(--font-mono); font-size: 14px; font-weight: 600; color: var(--phosphor); }
+.journal-cost__meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); }
+.rundetail__cost { font-family: var(--font-mono); font-size: 11px; color: var(--phosphor); }
+
 /* Phase gate bar (paused runs in Journal) */
 .gate-bar {
   display: flex;
