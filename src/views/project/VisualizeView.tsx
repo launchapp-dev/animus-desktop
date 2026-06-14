@@ -31,10 +31,17 @@ import {
   type RouteSpec,
 } from "../../api/animus";
 import {
+  localRunTranscript,
   localWorkflowRuns,
+  type HistoricalEvent,
   type WorkflowRunSummary,
 } from "../../api/event_log";
-import { relTime, statusColor } from "./journal/model";
+import {
+  formatDuration,
+  relTime,
+  statusColor,
+  statusFromCat,
+} from "./journal/model";
 import { useProjectAgentLiveStates } from "../../state/projectEvents";
 import { useActiveProject } from "../../state/activeProject";
 import type { AgentState } from "../../components/AgentFace";
@@ -67,6 +74,8 @@ interface PhaseNodeData extends Record<string, unknown> {
   dimmed?: boolean;
   /** Run-overlay: times this phase ran in the selected run (>1 = rework). */
   attempts?: number;
+  /** Run-overlay: this phase's derived status in the selected run. */
+  runStatus?: string | null;
 }
 interface WorkflowNodeData extends Record<string, unknown> {
   name: string;
@@ -96,10 +105,12 @@ function PhaseNode({ data }: NodeProps) {
   const d = data as PhaseNodeData;
   const live = d.liveState && d.liveState !== "idle" ? d.liveState : null;
   const liveColor = live ? LIVE_COLOR[live] : null;
+  const runColor = d.runStatus ? statusColor(d.runStatus) : null;
+  const borderColor = runColor ?? liveColor ?? undefined;
   return (
     <div
       className={`rf-phase-node ${live ? "rf-phase-node--live" : ""} ${d.dimmed ? "rf-phase-node--dim" : ""}`}
-      style={liveColor ? { borderColor: liveColor } : undefined}
+      style={borderColor ? { borderColor } : undefined}
     >
       {!!d.attempts && d.attempts > 1 && (
         <span className="rf-phase-node__attempts" title={`Ran ${d.attempts}× in this run (rework)`}>
@@ -114,11 +125,16 @@ function PhaseNode({ data }: NodeProps) {
           <span
             aria-hidden
             className="rf-phase-node__dot"
-            style={{ background: liveColor ?? colorFor(d.mode) }}
+            style={{ background: runColor ?? liveColor ?? colorFor(d.mode) }}
           />
         )}
         <span className="rf-phase-node__title">{d.label}</span>
         {live && <span className="rf-phase-node__live">{live}</span>}
+        {!live && d.runStatus && (
+          <span className="rf-phase-node__live" style={{ color: runColor ?? undefined }}>
+            {d.runStatus}
+          </span>
+        )}
       </div>
       <div className="rf-phase-node__meta">
         {d.agent && <span>@{d.agent}</span>}
@@ -211,6 +227,8 @@ interface RunOverlay {
   /** phase value -> number of times it executed in the selected run. */
   attempts: Map<string, number>;
   taken: Set<string>;
+  /** phase value -> derived per-phase status (completed/failed/decision/…). */
+  status: Map<string, string>;
 }
 
 function buildGraph(
@@ -284,6 +302,7 @@ function buildGraph(
       const isActive = live === "running" || live === "thinking";
       const taken = !overlay || overlay.taken.has(key);
       const attempts = overlay?.attempts.get(key) ?? 0;
+      const runStatus = overlay && taken ? overlay.status.get(key) ?? "completed" : null;
       nodes.push({
         id: phaseNodeId,
         type: "phase",
@@ -296,6 +315,7 @@ function buildGraph(
           liveState: overlay ? null : live,
           dimmed: overlay ? !taken : false,
           attempts: attempts > 1 ? attempts : 0,
+          runStatus,
         } as PhaseNodeData,
       });
       // The spine edge lights up (copper + animated) when the phase it feeds
@@ -722,6 +742,56 @@ function RoutingEditor({
   );
 }
 
+/** Compact per-phase event log for the run-overlay drill-in — a focused peek
+ *  (model output, tool calls, decisions, errors), NOT a replacement for the
+ *  full Journal/Transcript which remains the canonical deep log. */
+function PhaseRunLog({ events }: { events: HistoricalEvent[] }) {
+  const [open, setOpen] = useState(false);
+  const meaningful = events.filter((e) => {
+    const c = e.cat ?? "";
+    return (
+      c === "llm.output" ||
+      c === "llm.thinking" ||
+      c === "llm.tool_call" ||
+      c === "phase.decision" ||
+      c === "command.complete" ||
+      e.level === "error"
+    );
+  });
+  if (meaningful.length === 0) return null;
+  const shown = open ? meaningful : meaningful.slice(0, 6);
+  const label = (e: HistoricalEvent): string => {
+    const c = e.cat ?? "";
+    if (c === "llm.tool_call") return e.toolName ? `tool · ${e.toolName}` : "tool";
+    if (c === "llm.thinking") return "thinking";
+    if (c === "llm.output") return e.role ?? "output";
+    if (c === "phase.decision") return `decision · ${e.verdict ?? "?"}`;
+    if (c === "command.complete") return "command";
+    if (e.level === "error") return "error";
+    return c;
+  };
+  const text = (e: HistoricalEvent): string =>
+    (e.content ?? e.error ?? e.msg ?? e.toolResult ?? "").replace(/\s+/g, " ").trim();
+  return (
+    <div className="rf-phaselog">
+      <div className="sk-detail__label">Run log · {meaningful.length} events</div>
+      <div className="rf-phaselog__list">
+        {shown.map((e, i) => (
+          <div key={i} className={`rf-phaselog__row ${e.level === "error" ? "rf-phaselog__row--err" : ""}`}>
+            <span className="rf-phaselog__cat">{label(e)}</span>
+            {text(e) && <span className="rf-phaselog__txt">{text(e).slice(0, 160)}</span>}
+          </div>
+        ))}
+      </div>
+      {meaningful.length > 6 && (
+        <button type="button" className="rf-phaselog__more" onClick={() => setOpen((v) => !v)}>
+          {open ? "Show less" : `Show all ${meaningful.length}`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function VisualizeView({ project }: { project: Project }) {
   const [report, setReport] = useState<WorkflowYamlReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -732,6 +802,7 @@ export function VisualizeView({ project }: { project: Project }) {
   const [view, setView] = useState<"graph" | "gantt" | "grid">("graph");
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
   const [overlayRun, setOverlayRun] = useState<string | null>(null);
+  const [runEvents, setRunEvents] = useState<HistoricalEvent[]>([]);
   const [sourceWf, setSourceWf] = useState<WorkflowSummary | null>(null);
   const [sourceText, setSourceText] = useState<string | null>(null);
   const [now] = useState(() => Date.now());
@@ -785,6 +856,57 @@ export function VisualizeView({ project }: { project: Project }) {
     };
   }, [project.repo_path]);
 
+  // Pull the full transcript for the overlaid run so we can derive real
+  // per-phase status / verdict / duration and show a focused per-phase log.
+  useEffect(() => {
+    const path = project.repo_path?.trim();
+    if (!overlayRun || !path) {
+      setRunEvents([]);
+      return;
+    }
+    let cancelled = false;
+    localRunTranscript({ repoPath: path, wfUuid: overlayRun })
+      .then((evs) => !cancelled && setRunEvents(evs))
+      .catch(() => !cancelled && setRunEvents([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [overlayRun, project.repo_path]);
+
+  // Per-phase detail derived from the overlaid run's transcript: status,
+  // verdict, duration, error, and the phase's own events (for the drawer log).
+  const phaseDetail = useMemo(() => {
+    const m = new Map<
+      string,
+      {
+        status: string;
+        verdict: string | null;
+        durationMs: number | null;
+        error: string | null;
+        events: HistoricalEvent[];
+      }
+    >();
+    for (const e of runEvents) {
+      const pid = e.phaseId;
+      if (!pid) continue;
+      let d = m.get(pid);
+      if (!d) {
+        d = { status: "completed", verdict: null, durationMs: null, error: null, events: [] };
+        m.set(pid, d);
+      }
+      d.events.push(e);
+      const cat = e.cat ?? "";
+      const st = statusFromCat(cat, e.level, e.exitCode);
+      if (st === "failed") d.status = "failed";
+      else if (st === "decision" && d.status !== "failed") d.status = "decision";
+      if (e.verdict) d.verdict = e.verdict;
+      if (e.error && !d.error) d.error = e.error;
+      if (e.durationMs != null && (cat === "phase.complete" || d.durationMs == null))
+        d.durationMs = e.durationMs;
+    }
+    return m;
+  }, [runEvents]);
+
   // When a past run is selected, build a per-phase attempt count + a taken-set
   // to overlay on the definition graph (dim untaken, badge reworked phases).
   const overlay = useMemo((): RunOverlay | null => {
@@ -793,8 +915,10 @@ export function VisualizeView({ project }: { project: Project }) {
     if (!run) return null;
     const attempts = new Map<string, number>();
     for (const p of run.phases) attempts.set(p, (attempts.get(p) ?? 0) + 1);
-    return { attempts, taken: new Set(run.phases) };
-  }, [overlayRun, runs]);
+    const status = new Map<string, string>();
+    for (const [pid, d] of phaseDetail) status.set(pid, d.status);
+    return { attempts, taken: new Set(run.phases), status };
+  }, [overlayRun, runs, phaseDetail]);
 
   const { nodes, edges } = useMemo(() => {
     if (!report) return { nodes: [] as Node[], edges: [] as Edge[] };
@@ -1059,7 +1183,9 @@ export function VisualizeView({ project }: { project: Project }) {
                   const run = runs.find((r) => r.wfUuid === overlayRun);
                   const attempts = overlay.attempts.get(selectedPhase.id) ?? 0;
                   const taken = overlay.taken.has(selectedPhase.id);
+                  const detail = phaseDetail.get(selectedPhase.id);
                   if (!run) return null;
+                  const st = taken ? detail?.status ?? run.status : "not exercised";
                   return (
                     <div className="sk-detail__section">
                       <div className="sk-detail__label">In selected run</div>
@@ -1067,9 +1193,9 @@ export function VisualizeView({ project }: { project: Project }) {
                         <span className="rt-row__role">status</span>
                         <span
                           className="rt-row__name"
-                          style={{ color: taken ? statusColor(run.status) : "var(--text-faint)" }}
+                          style={{ color: taken ? statusColor(st) : "var(--text-faint)" }}
                         >
-                          {taken ? run.status : "not exercised"}
+                          {st}
                         </span>
                       </div>
                       {attempts > 0 && (
@@ -1080,6 +1206,24 @@ export function VisualizeView({ project }: { project: Project }) {
                             {attempts > 1 ? " (rework)" : ""}
                           </span>
                         </div>
+                      )}
+                      {detail?.verdict && (
+                        <div className="rt-row">
+                          <span className="rt-row__role">verdict</span>
+                          <span className="rt-row__name">{detail.verdict}</span>
+                        </div>
+                      )}
+                      {detail?.durationMs != null && (
+                        <div className="rt-row">
+                          <span className="rt-row__role">took</span>
+                          <span className="rt-row__name">{formatDuration(detail.durationMs)}</span>
+                        </div>
+                      )}
+                      {detail?.error && (
+                        <pre className="rf-phaselog__err">{detail.error}</pre>
+                      )}
+                      {detail && detail.events.length > 0 && (
+                        <PhaseRunLog events={detail.events} />
                       )}
                     </div>
                   );
