@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Background,
+  BackgroundVariant,
   Controls,
   Handle,
   MarkerType,
+  MiniMap,
   Position,
   ReactFlow,
   type Edge,
@@ -43,6 +45,15 @@ const LIVE_COLOR: Record<string, string> = {
   error: "var(--crimson)",
   refusing: "var(--crimson)",
 };
+
+/** MiniMap dot color by node type / live state. */
+function miniMapColor(node: Node): string {
+  if (node.type === "workflow") return "var(--copper)";
+  if (node.type === "trigger") return "var(--text-faint)";
+  const live = (node.data as PhaseNodeData)?.liveState;
+  if (live && LIVE_COLOR[live]) return LIVE_COLOR[live]!;
+  return "var(--border-strong)";
+}
 
 interface PhaseNodeData extends Record<string, unknown> {
   label: string;
@@ -744,8 +755,14 @@ export function VisualizeView({ project }: { project: Project }) {
           fitView
           proOptions={{ hideAttribution: true }}
         >
-          <Background gap={24} color="var(--bg-tint-5)" />
-          <Controls position="bottom-right" />
+          <Background variant={BackgroundVariant.Dots} gap={24} size={1} />
+          <Controls position="bottom-right" showInteractive={false} />
+          <MiniMap
+            pannable
+            zoomable
+            nodeColor={(n) => miniMapColor(n)}
+            nodeStrokeWidth={0}
+          />
         </ReactFlow>
         {selectedPhase && (
           <aside className="wf-cfg">

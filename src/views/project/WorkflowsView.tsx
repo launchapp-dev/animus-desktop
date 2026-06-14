@@ -26,6 +26,7 @@ import { localAgentCreate, emptyAgentUpdate } from "../../api/agent_edit";
 import { chatProviders, type ProviderOption } from "../../api/chat";
 import {
   Background,
+  BackgroundVariant,
   BaseEdge,
   Controls,
   EdgeLabelRenderer,
@@ -333,15 +334,9 @@ function WorkflowCanvas({
             Tidy
           </button>
         </Panel>
-        <Background gap={22} color="var(--bg-tint-5)" />
+        <Background variant={BackgroundVariant.Dots} gap={22} size={1} />
         <Controls position="bottom-right" showInteractive={false} />
-        <MiniMap
-          pannable
-          zoomable
-          nodeColor="var(--copper)"
-          maskColor="rgba(0,0,0,0.35)"
-          style={{ background: "var(--bg-elevated)" }}
-        />
+        <MiniMap pannable zoomable nodeColor="var(--copper)" nodeStrokeWidth={0} />
       </ReactFlow>
       {chooser && (
         <>

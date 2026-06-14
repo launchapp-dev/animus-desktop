@@ -2433,6 +2433,51 @@ a {
   position: relative;
 }
 
+/* React Flow chrome themed to The Instrument. Scoped to .react-flow so it
+   covers both the builder canvas and the run visualizer, and rides our design
+   tokens so the light theme inverts for free. */
+.react-flow {
+  --xy-node-background-color-default: var(--surface-1);
+  --xy-node-border-default: var(--hairline) solid var(--border);
+  --xy-node-color-default: var(--text);
+  --xy-node-boxshadow-selected-default: 0 0 0 1px var(--copper);
+  --xy-handle-background-color-default: var(--copper);
+  --xy-handle-border-color-default: var(--surface-1);
+  --xy-edge-stroke-default: var(--border-strong);
+  --xy-edge-stroke-width-default: 1.5;
+  --xy-edge-stroke-selected-default: var(--copper);
+  --xy-connectionline-stroke-default: var(--copper);
+  --xy-connectionline-stroke-width-default: 1.5;
+  --xy-background-pattern-dots-color-default: var(--border);
+  --xy-minimap-background-color-default: var(--surface-1);
+  --xy-minimap-mask-background-color-default: rgba(0, 0, 0, 0.32);
+  --xy-controls-button-background-color-default: var(--surface-1);
+  --xy-controls-button-background-color-hover-default: var(--surface-2);
+  --xy-controls-button-color-default: var(--text-faint);
+  --xy-controls-button-color-hover-default: var(--text);
+  --xy-controls-button-border-color-default: var(--border);
+  --xy-selection-background-color-default: var(--copper-bg-soft);
+  --xy-selection-border-default: 1px dotted var(--copper);
+  --xy-attribution-background-color-default: transparent;
+}
+/* Controls: hairline pill cluster rather than stark white boxes. */
+.react-flow .react-flow__controls {
+  box-shadow: none;
+  border: var(--hairline) solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface-1);
+}
+.react-flow .react-flow__controls-button {
+  border-bottom: var(--hairline) solid var(--border);
+}
+.react-flow .react-flow__controls-button svg { fill: currentColor; }
+.react-flow .react-flow__minimap {
+  border: var(--hairline) solid var(--border);
+  border-radius: 10px;
+}
+.react-flow .react-flow__minimap-mask { fill: var(--xy-minimap-mask-background-color-default); }
+
 .rf-canvas .react-flow {
   background: transparent;
 }
