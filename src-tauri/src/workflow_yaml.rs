@@ -67,6 +67,17 @@ pub struct PhaseRef {
     /// feedback edges that make a pipeline a graph rather than a list.
     pub max_rework_attempts: Option<u32>,
     pub rework_target: Option<String>,
+    /// All `on_verdict` routes (verdict -> target phase / terminal action),
+    /// so the UI can draw the full branch graph, not just the rework loop.
+    pub branches: Vec<BranchRoute>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchRoute {
+    pub verdict: String,
+    pub target: Option<String>,
+    pub action: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -763,6 +774,7 @@ fn phase_ref_from_yaml(v: &Yaml) -> PhaseRef {
             value: s.to_string(),
             max_rework_attempts: None,
             rework_target: None,
+            branches: Vec::new(),
         };
     }
     if let Some(m) = v.as_mapping() {
@@ -782,6 +794,7 @@ fn phase_ref_from_yaml(v: &Yaml) -> PhaseRef {
                                 .map(|n| n as u32)
                         }),
                         rework_target: inline.and_then(rework_target_from_inline),
+                        branches: inline.map(branches_from_inline).unwrap_or_default(),
                     };
                 }
             }
@@ -793,6 +806,7 @@ fn phase_ref_from_yaml(v: &Yaml) -> PhaseRef {
                     value: s.to_string(),
                     max_rework_attempts: None,
                     rework_target: None,
+                    branches: Vec::new(),
                 };
             }
         }
@@ -803,6 +817,7 @@ fn phase_ref_from_yaml(v: &Yaml) -> PhaseRef {
                     value: s.to_string(),
                     max_rework_attempts: None,
                     rework_target: None,
+                    branches: Vec::new(),
                 };
             }
         }
@@ -812,7 +827,38 @@ fn phase_ref_from_yaml(v: &Yaml) -> PhaseRef {
         value: "<unknown>".to_string(),
         max_rework_attempts: None,
         rework_target: None,
+        branches: Vec::new(),
     }
+}
+
+/// Pull every `on_verdict` route (verdict -> {target, action}) from an inline
+/// phase step, so the UI can draw the full branch graph.
+fn branches_from_inline(inline: &serde_yaml::Mapping) -> Vec<BranchRoute> {
+    inline
+        .get(Yaml::String("on_verdict".into()))
+        .and_then(|v| v.as_mapping())
+        .map(|ov| {
+            ov.iter()
+                .filter_map(|(k, body)| {
+                    let verdict = k.as_str()?.to_string();
+                    let bm = body.as_mapping();
+                    let target = bm
+                        .and_then(|m| m.get(Yaml::String("target".into())))
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
+                    let action = bm
+                        .and_then(|m| m.get(Yaml::String("action".into())))
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
+                    Some(BranchRoute {
+                        verdict,
+                        target,
+                        action,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Pull `on_verdict.rework.target` out of an inline phase step.

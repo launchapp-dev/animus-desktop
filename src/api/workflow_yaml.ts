@@ -20,11 +20,18 @@ export interface WorkflowFileReport {
   counts: FileCounts;
 }
 
+export interface BranchRoute {
+  verdict: string;
+  target: string | null;
+  action: string | null;
+}
+
 export interface PhaseRef {
   kind: PhaseRefKind;
   value: string;
   maxReworkAttempts: number | null;
   reworkTarget: string | null;
+  branches: BranchRoute[];
 }
 
 export interface WorkflowSummary {

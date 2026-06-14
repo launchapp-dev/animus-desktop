@@ -192,7 +192,12 @@ function buildGraph(
 
     let prev = wfNodeId;
     const phaseNodeByValue = new Map<string, string>();
-    const reworkSpecs: { from: string; target: string; max: number | null }[] = [];
+    const branchSpecs: {
+      from: string;
+      verdict: string;
+      target: string;
+      max: number | null;
+    }[] = [];
     wf.phases.forEach((p, pIdx) => {
       const key = p.value;
       const ps = phaseById.get(key);
@@ -218,9 +223,21 @@ function buildGraph(
         style: { stroke: "var(--border-strong)", strokeWidth: 1.25 },
       });
       phaseNodeByValue.set(key, phaseNodeId);
-      if (p.reworkTarget) {
-        reworkSpecs.push({
+      // Every on_verdict route with a target phase becomes a branch edge.
+      const routes = (p.branches ?? []).filter((b) => b.target);
+      for (const b of routes) {
+        branchSpecs.push({
           from: phaseNodeId,
+          verdict: b.verdict,
+          target: b.target!,
+          max: b.verdict === "rework" ? p.maxReworkAttempts : null,
+        });
+      }
+      // Fall back to a bare reworkTarget if on_verdict wasn't expanded.
+      if (p.reworkTarget && !routes.some((b) => b.verdict === "rework")) {
+        branchSpecs.push({
+          from: phaseNodeId,
+          verdict: "rework",
           target: p.reworkTarget,
           max: p.maxReworkAttempts,
         });
@@ -228,21 +245,36 @@ function buildGraph(
       prev = phaseNodeId;
     });
 
-    // Rework loop-back edges to the real on_verdict.rework.target.
-    for (const spec of reworkSpecs) {
+    // Branch edges: approve/advance = green solid, rework = yellow dashed loop,
+    // reject/fail = red. Routing is derived from on_verdict, not stored linear.
+    for (const spec of branchSpecs) {
       const targetNode = phaseNodeByValue.get(spec.target);
       if (!targetNode) continue;
+      const v = spec.verdict.toLowerCase();
+      const isRework = v === "rework";
+      const isFail = v === "fail" || v === "reject";
+      const color = isRework
+        ? "var(--yellow)"
+        : isFail
+          ? "var(--crimson)"
+          : v === "approve" || v === "advance" || v === "pass"
+            ? "var(--green)"
+            : "var(--copper)";
       edges.push({
-        id: `rework:${spec.from}->${targetNode}`,
+        id: `branch:${spec.from}:${v}->${targetNode}`,
         source: spec.from,
         target: targetNode,
         type: "default",
-        animated: true,
-        label: spec.max ? `rework ×${spec.max}` : "rework",
-        style: { stroke: "var(--yellow)", strokeDasharray: "5 4", strokeWidth: 1.25 },
-        labelStyle: { fill: "var(--yellow)", fontSize: 10 },
+        animated: isRework,
+        label: isRework && spec.max ? `rework ×${spec.max}` : spec.verdict,
+        style: {
+          stroke: color,
+          strokeWidth: 1.25,
+          ...(isRework || isFail ? { strokeDasharray: "5 4" } : {}),
+        },
+        labelStyle: { fill: color, fontSize: 10 },
         labelBgStyle: { fill: "var(--bg-elevated)", fillOpacity: 0.9 },
-        markerEnd: { type: MarkerType.ArrowClosed, color: "var(--yellow)" },
+        markerEnd: { type: MarkerType.ArrowClosed, color },
       });
     }
   });
