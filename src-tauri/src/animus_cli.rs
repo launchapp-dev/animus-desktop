@@ -48,6 +48,17 @@ fn animus_binary() -> PathBuf {
 }
 
 async fn run_animus_json(path: &str, args: &[&str]) -> Result<AnimusCliResult, String> {
+    run_animus_json_timeout(path, args, ANIMUS_CALL_TIMEOUT).await
+}
+
+/// Like [`run_animus_json`] but with a caller-chosen timeout — used by
+/// long-running commands (the init walkthrough installs plugins + packs and
+/// routinely exceeds the default 60s cap).
+async fn run_animus_json_timeout(
+    path: &str,
+    args: &[&str],
+    call_timeout: Duration,
+) -> Result<AnimusCliResult, String> {
     let bin = animus_binary();
     let project_root = path.trim().to_string();
     if project_root.is_empty() {
@@ -61,13 +72,13 @@ async fn run_animus_json(path: &str, args: &[&str]) -> Result<AnimusCliResult, S
     }
     cmd.arg("--json");
 
-    let output = match timeout(ANIMUS_CALL_TIMEOUT, cmd.output()).await {
+    let output = match timeout(call_timeout, cmd.output()).await {
         Ok(res) => res
             .map_err(|e| format!("spawn animus failed: {}: {}", bin.display(), e))?,
         Err(_) => {
             return Err(format!(
                 "animus subprocess timed out after {}s ({} {:?})",
-                ANIMUS_CALL_TIMEOUT.as_secs(),
+                call_timeout.as_secs(),
                 bin.display(),
                 args
             ));
@@ -209,6 +220,33 @@ pub async fn animus_flavor_current(path: String) -> Result<AnimusCliResult, Stri
 #[tauri::command]
 pub async fn animus_flavor_list(path: String) -> Result<AnimusCliResult, String> {
     run_animus_json(&path, &["flavor", "list"]).await
+}
+
+/// Run the onboarding walkthrough non-interactively: detect provider CLIs,
+/// install the flavor's default plugins, copy the hello-world workflow, and
+/// (optionally) install recommended packs / auto-start the daemon. This is the
+/// "set up Animus in this project" path for an adopted folder. Runs with an
+/// extended timeout because plugin + pack installs hit the network.
+#[tauri::command]
+pub async fn animus_init(
+    path: String,
+    install_packs: bool,
+    auto_start: bool,
+    no_install: bool,
+) -> Result<AnimusCliResult, String> {
+    let mut args: Vec<&str> = vec!["init", "--walkthrough", "--non-interactive"];
+    if install_packs {
+        args.push("--install-packs");
+    } else {
+        args.push("--no-packs");
+    }
+    if no_install {
+        args.push("--no-install");
+    }
+    if auto_start {
+        args.push("--auto-start");
+    }
+    run_animus_json_timeout(&path, &args, Duration::from_secs(300)).await
 }
 
 /// Install (switch to) a flavor: installs every plugin its manifest marks

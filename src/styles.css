@@ -7824,6 +7824,34 @@ textarea.wf-input { font-family: var(--font-mono); font-size: 11.5px; resize: ve
 .journal-cost__meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); }
 .rundetail__cost { font-family: var(--font-mono); font-size: 11px; color: var(--phosphor); }
 
+/* Onboarding / setup walkthrough (Runtime tab) */
+.rt-setup {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: var(--hairline) solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-1);
+}
+.rt-setup--lead {
+  border-color: var(--copper);
+  background: var(--copper-bg-soft);
+}
+.rt-setup__main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.rt-setup__title { margin: 0; font-size: 14px; font-weight: 600; color: var(--text); }
+.rt-setup__sub { margin: 0; font-size: 12px; color: var(--text-faint); line-height: 1.5; }
+.rt-setup__opts { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 4px; }
+.rt-setup__action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.rt-setup__msg { font-size: 11px; color: var(--phosphor); font-family: var(--font-mono); }
+
 /* Branch routing editor (Visualize phase panel) */
 .wf-route { display: flex; flex-direction: column; gap: 8px; }
 .wf-route__row { display: flex; align-items: center; gap: 8px; }

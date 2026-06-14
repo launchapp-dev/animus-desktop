@@ -4,6 +4,7 @@ import {
   animusFlavorCurrent,
   animusFlavorInstall,
   animusFlavorList,
+  animusInit,
   type FlavorCurrent,
   type FlavorListEntry,
   type FlavorManifest,
@@ -127,6 +128,12 @@ export function PluginsView({ project }: { project: Project }) {
   const [showRecommended, setShowRecommended] = useState(false);
   const [switching, setSwitching] = useState(false);
 
+  // Onboarding walkthrough
+  const [initBusy, setInitBusy] = useState(false);
+  const [initMsg, setInitMsg] = useState<string | null>(null);
+  const [initPacks, setInitPacks] = useState(true);
+  const [initAutoStart, setInitAutoStart] = useState(false);
+
   const load = useCallback(async () => {
     if (!path) {
       setError("This project has no folder path on disk.");
@@ -239,7 +246,37 @@ export function PluginsView({ project }: { project: Project }) {
     }
   }
 
+  async function runWalkthrough() {
+    setInitBusy(true);
+    setInitMsg(null);
+    setError(null);
+    try {
+      const res = await animusInit(path, {
+        installPacks: initPacks,
+        autoStart: initAutoStart,
+      });
+      if (res.ok) {
+        setInitMsg("Setup complete.");
+      } else {
+        setInitMsg(null);
+        setError(
+          (res.error && typeof res.error === "object" && "message" in res.error
+            ? String((res.error as { message: unknown }).message)
+            : null) ?? res.rawStderr ?? "setup walkthrough failed",
+        );
+      }
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setInitBusy(false);
+    }
+  }
+
   const ready = flavor != null && missingRequired.length === 0;
+  // A project with no required plugins present and nothing installed reads as
+  // freshly adopted — lead with the one-click walkthrough.
+  const needsSetup = !ready && installed.length === 0;
 
   return (
     <div className="rt-pane">
@@ -303,6 +340,50 @@ export function PluginsView({ project }: { project: Project }) {
           <pre style={{ whiteSpace: "pre-wrap", fontSize: 11 }}>{error}</pre>
         </div>
       )}
+
+      <section className={`rt-setup ${needsSetup ? "rt-setup--lead" : ""}`}>
+        <div className="rt-setup__main">
+          <h3 className="rt-setup__title">
+            {needsSetup ? "Set up Animus in this project" : "Setup walkthrough"}
+          </h3>
+          <p className="rt-setup__sub">
+            Detects your provider CLIs, installs the flavor's default plugins,
+            and copies a starter workflow into <code>.animus/</code>. Safe to
+            re-run.
+          </p>
+          <div className="rt-setup__opts">
+            <label className="plugins-pane__toggle">
+              <input
+                type="checkbox"
+                checked={initPacks}
+                onChange={(e) => setInitPacks(e.target.checked)}
+                disabled={initBusy}
+              />
+              <span>Install recommended packs</span>
+            </label>
+            <label className="plugins-pane__toggle">
+              <input
+                type="checkbox"
+                checked={initAutoStart}
+                onChange={(e) => setInitAutoStart(e.target.checked)}
+                disabled={initBusy}
+              />
+              <span>Start the daemon when done</span>
+            </label>
+          </div>
+        </div>
+        <div className="rt-setup__action">
+          <button
+            type="button"
+            className={needsSetup ? "rt-install rt-install--bulk" : "plugins-pane__ghost"}
+            disabled={initBusy || !path}
+            onClick={() => void runWalkthrough()}
+          >
+            {initBusy ? "Setting up…" : needsSetup ? "Run setup" : "Re-run walkthrough"}
+          </button>
+          {initMsg && <span className="rt-setup__msg">{initMsg}</span>}
+        </div>
+      </section>
 
       {flavor && (
         <>

@@ -291,6 +291,21 @@ export function animusFlavorInstall(
   });
 }
 
+/** Run the onboarding walkthrough non-interactively to scaffold `.animus` in
+ *  an adopted folder (detect CLIs, install default plugins, copy hello-world,
+ *  optionally install packs / auto-start the daemon). */
+export function animusInit(
+  path: string,
+  opts: { installPacks?: boolean; autoStart?: boolean; noInstall?: boolean } = {},
+): Promise<AnimusCliResult> {
+  return invoke<AnimusCliResult>("animus_init", {
+    path,
+    installPacks: opts.installPacks ?? true,
+    autoStart: opts.autoStart ?? false,
+    noInstall: opts.noInstall ?? false,
+  });
+}
+
 // --- Skills ------------------------------------------------------------------
 
 export interface SkillSummary {

@@ -164,6 +164,7 @@ pub fn run() {
             animus_cli::animus_flavor_current,
             animus_cli::animus_flavor_list,
             animus_cli::animus_flavor_install,
+            animus_cli::animus_init,
             animus_cli::animus_workflow_definition_upsert,
             animus_cli::animus_workflow_phase_get,
             animus_cli::animus_workflow_phase_upsert,
