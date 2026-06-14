@@ -163,6 +163,7 @@ pub fn run() {
             animus_cli::animus_secret_export_env,
             animus_cli::animus_flavor_current,
             animus_cli::animus_workflow_definition_upsert,
+            animus_cli::animus_workflow_phase_get,
             animus_cli::animus_workflow_phase_upsert,
             animus_cli::animus_workflow_phase_remove,
             animus_cli::animus_skill_list,

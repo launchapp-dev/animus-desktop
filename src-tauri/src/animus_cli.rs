@@ -227,6 +227,19 @@ pub async fn animus_workflow_definition_upsert(
     .await
 }
 
+/// Get a phase definition (full runtime) by id, for editing.
+#[tauri::command]
+pub async fn animus_workflow_phase_get(
+    path: String,
+    phase_id: String,
+) -> Result<AnimusCliResult, String> {
+    let pid = phase_id.trim();
+    if !valid_phase_id(pid) {
+        return Err("invalid phase id".to_string());
+    }
+    run_animus_json(&path, &["workflow", "phases", "get", "--phase", pid]).await
+}
+
 /// Create or replace a phase definition in the generated overlay.
 #[tauri::command]
 pub async fn animus_workflow_phase_upsert(

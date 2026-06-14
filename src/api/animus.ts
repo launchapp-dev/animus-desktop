@@ -187,6 +187,17 @@ export function animusWorkflowDefinitionUpsert(
   });
 }
 
+/** Get a phase's full definition for editing: { phase_id, runtime, ui }. */
+export function animusWorkflowPhaseGet(
+  path: string,
+  phaseId: string,
+): Promise<AnimusCliResult<{ phase_id: string; runtime: Record<string, unknown> }>> {
+  return invoke<AnimusCliResult<{ phase_id: string; runtime: Record<string, unknown> }>>(
+    "animus_workflow_phase_get",
+    { path, phaseId },
+  );
+}
+
 /** Create or replace a phase. `runtime` = { mode, agent_id?, directive?,
  *  command?, decision_contract?, ... }. */
 export function animusWorkflowPhaseUpsert(
