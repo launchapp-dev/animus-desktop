@@ -1248,6 +1248,8 @@ function WorkflowComposer({
     return m;
   }, [lint]);
   const [paletteOpen, setPaletteOpen] = useState(true);
+  const [showReview, setShowReview] = useState(false);
+  const lintWarnings = lint.filter((l) => l.level === "warn");
 
   const addPhase = (p: string) => {
     if (p && !phases.includes(p)) setPhases((prev) => [...prev, p]);
@@ -1347,11 +1349,75 @@ function WorkflowComposer({
           <button
             type="button"
             className="workflow-row__run"
-            disabled={busy || lintErrors.length > 0}
-            onClick={() => void save()}
+            disabled={busy || lintErrors.length > 0 || phases.length === 0}
+            onClick={() => setShowReview(true)}
           >
-            {busy ? "Saving…" : "Create"}
+            {busy ? "Saving…" : "Review & Create"}
           </button>
+          {showReview && (
+            <>
+              <div className="wf-review__backdrop" onClick={() => setShowReview(false)} />
+              <div className="wf-review" role="dialog">
+                <div className="wf-review__title">Review workflow</div>
+                <div className="wf-review__meta">
+                  <code>{id.trim() || "workflow-id"}</code>
+                  <span>· {phases.length} phase{phases.length === 1 ? "" : "s"}</span>
+                </div>
+                <ol className="wf-review__phases">
+                  {phases.map((p, i) => {
+                    const info = phaseInfo[p];
+                    const rt = reworkTargets[p];
+                    return (
+                      <li key={p} className="wf-review__phase">
+                        <span className="wf-review__idx">{i + 1}</span>
+                        <span className="wf-review__pname">{p}</span>
+                        <span className="wf-review__pmeta">
+                          {info?.mode ?? "agent"}
+                          {info?.agent ? ` · @${info.agent}` : ""}
+                          {info?.gate ? " · gate" : ""}
+                        </span>
+                        {rt && (
+                          <span className="wf-review__route">on reject → {rt}</span>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ol>
+                {lintWarnings.length > 0 && (
+                  <div className="wf-review__warns">
+                    {lintWarnings.map((w, i) => (
+                      <div key={i} className="wf-review__warn">⚠ {w.message}</div>
+                    ))}
+                  </div>
+                )}
+                <p className="wf-review__note">
+                  Creating writes this workflow's YAML to{" "}
+                  <code>.animus/workflows/</code>. Nothing runs yet.
+                </p>
+                <div className="wf-review__actions">
+                  <button
+                    type="button"
+                    className="plugins-pane__ghost"
+                    onClick={() => setShowReview(false)}
+                    disabled={busy}
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    className="workflow-row__run"
+                    disabled={busy}
+                    onClick={() => {
+                      setShowReview(false);
+                      void save();
+                    }}
+                  >
+                    {busy ? "Creating…" : "Create workflow"}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
           <button type="button" className="plugins-pane__ghost" onClick={onCancel}>
             Cancel
           </button>

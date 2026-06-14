@@ -7995,7 +7995,49 @@ textarea.wf-input { font-family: var(--font-mono); font-size: 11.5px; resize: ve
 .wf-builder__id { max-width: 170px; font-family: var(--font-mono); }
 .wf-builder__name { max-width: 200px; }
 .wf-builder__desc { flex: 1; min-width: 0; }
-.wf-builder__actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.wf-builder__actions { display: flex; align-items: center; gap: 8px; margin-left: auto; position: relative; }
+/* Pre-Create review popover */
+.wf-review__backdrop { position: fixed; inset: 0; z-index: 70; }
+.wf-review {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 71;
+  width: 340px;
+  max-height: 70vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  background: var(--surface-2);
+  border: var(--hairline) solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: var(--shadow-2);
+  text-align: left;
+}
+.wf-review__title { font-size: 13px; font-weight: 600; color: var(--text); }
+.wf-review__meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); display: flex; gap: 6px; align-items: baseline; }
+.wf-review__phases { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.wf-review__phase {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  grid-auto-rows: min-content;
+  gap: 1px 8px;
+  align-items: baseline;
+  padding: 6px 8px;
+  background: var(--surface-1);
+  border: var(--hairline) solid var(--border);
+  border-radius: 8px;
+}
+.wf-review__idx { grid-row: span 2; font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); }
+.wf-review__pname { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.wf-review__pmeta { grid-column: 2; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); }
+.wf-review__route { grid-column: 2; font-family: var(--font-mono); font-size: 10px; color: var(--yellow); }
+.wf-review__warns { display: flex; flex-direction: column; gap: 3px; }
+.wf-review__warn { font-size: 11px; color: var(--brass); }
+.wf-review__note { margin: 2px 0 0; font-size: 10.5px; line-height: 1.5; color: var(--text-faint); }
+.wf-review__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .wf-builder__lintchip { font-size: 11px; padding: 2px 9px; border-radius: 999px; }
 .wf-builder__lintchip--err { color: var(--crimson); background: var(--red-bg); }
 .wf-builder__main { flex: 1; min-height: 0; display: flex; }
