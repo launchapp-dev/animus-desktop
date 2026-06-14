@@ -373,6 +373,41 @@ function WorkflowCanvas({
 const SLUG_RE = /^[a-z0-9][a-z0-9_-]*$/;
 const PROVIDER_TOOLS = ["claude", "codex", "gemini", "opencode"];
 
+interface WorkflowTemplate {
+  id: string;
+  name: string;
+  description: string;
+  /** Candidate phase ids in order; only those present in the project are used. */
+  phases: string[];
+}
+
+const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
+  {
+    id: "code-review",
+    name: "Code review",
+    description: "Implement a change, then gate it through review.",
+    phases: ["implementation", "lint", "code-review"],
+  },
+  {
+    id: "research",
+    name: "Research",
+    description: "Gather and synthesize, then review the findings.",
+    phases: ["requirements", "research", "deliverable-validation"],
+  },
+  {
+    id: "implementation",
+    name: "Implementation",
+    description: "Plan, implement, and QA a task end-to-end.",
+    phases: ["requirements", "implementation", "lint", "code-review"],
+  },
+  {
+    id: "qa",
+    name: "QA pass",
+    description: "Run checks and tests over the current state.",
+    phases: ["lint", "run-checks", "run-tests"],
+  },
+];
+
 function errMessage(res: { error: unknown; rawStderr: string }, fallback: string): string {
   return (
     (res.error && typeof res.error === "object" && "message" in res.error
@@ -1014,6 +1049,20 @@ function WorkflowComposer({
     if (!p || phases.includes(p)) return;
     setPhases((prev) => [...prev.slice(0, index), p, ...prev.slice(index)]);
   };
+  const templates = useMemo(
+    () =>
+      WORKFLOW_TEMPLATES.map((t) => ({
+        ...t,
+        usable: t.phases.filter((p) => availablePhases.includes(p)),
+      })).filter((t) => t.usable.length > 0),
+    [availablePhases],
+  );
+  const applyTemplate = (t: { id: string; name: string; description: string; usable: string[] }) => {
+    if (!id.trim()) setId(t.id);
+    if (!name.trim()) setName(t.name);
+    if (!description.trim()) setDescription(t.description);
+    setPhases(t.usable);
+  };
   const move = (i: number, d: -1 | 1) =>
     setPhases((prev) => {
       const next = [...prev];
@@ -1082,6 +1131,28 @@ function WorkflowComposer({
         value={description}
         onChange={(e) => setDescription(e.target.value)}
       />
+
+      {phases.length === 0 && templates.length > 0 && (
+        <div className="wf-templates">
+          <span className="wf-compose__label">Start from a template</span>
+          <div className="wf-templates__row">
+            {templates.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className="wf-template"
+                onClick={() => applyTemplate(t)}
+              >
+                <span className="wf-template__name">{t.name}</span>
+                <span className="wf-template__desc">{t.description}</span>
+                <span className="wf-template__phases">
+                  {t.usable.join(" → ")}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="wf-compose__phases">
         <div className="wf-compose__phaseshead">

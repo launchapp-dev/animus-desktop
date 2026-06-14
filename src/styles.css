@@ -7615,6 +7615,26 @@ textarea.wf-input { font-family: var(--font-mono); font-size: 11.5px; resize: ve
 .wf-lint__dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 .wf-lint__item--error .wf-lint__dot { background: var(--crimson); }
 .wf-lint__item--warn .wf-lint__dot { background: var(--yellow); }
+/* Workflow templates */
+.wf-templates { display: flex; flex-direction: column; gap: 6px; }
+.wf-templates__row { display: flex; gap: 8px; flex-wrap: wrap; }
+.wf-template {
+  flex: 1 1 160px;
+  min-width: 160px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 11px;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  transition: border-color var(--motion-fast) var(--ease-out), background var(--motion-fast) var(--ease-out);
+}
+.wf-template:hover { border-color: var(--copper); background: var(--copper-bg-soft); }
+.wf-template__name { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.wf-template__desc { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
+.wf-template__phases { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); }
 
 /* Phase gate bar (paused runs in Journal) */
 .gate-bar {
