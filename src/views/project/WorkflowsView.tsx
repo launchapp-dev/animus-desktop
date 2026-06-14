@@ -210,6 +210,11 @@ function WorkflowCanvas({
   );
   const [rf, setRf] = useState<ReactFlowInstance | null>(null);
 
+  // Keep the chain in view as phases are added/removed.
+  useEffect(() => {
+    if (rf) requestAnimationFrame(() => rf.fitView({ padding: 0.25, duration: 200 }));
+  }, [phases.length, rf]);
+
   // Re-lay-out whenever the ordered array changes (snaps nodes to a clean
   // left→right chain in the current order).
   useEffect(() => {
@@ -1013,9 +1018,7 @@ function WorkflowComposer({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [phases, setPhases] = useState<string[]>([]);
-  const [picker, setPicker] = useState("");
   const [newPhase, setNewPhase] = useState(false);
-  const [view, setView] = useState<"list" | "canvas">("list");
   // When set, a freshly-authored phase is spliced in at this index (vs appended).
   const [pendingInsert, setPendingInsert] = useState<number | null>(null);
   const [selectedPhase, setSelectedPhase] = useState<string | null>(null);
@@ -1043,7 +1046,6 @@ function WorkflowComposer({
 
   const addPhase = (p: string) => {
     if (p && !phases.includes(p)) setPhases((prev) => [...prev, p]);
-    setPicker("");
   };
   const insertPhaseAt = (index: number, p: string) => {
     if (!p || phases.includes(p)) return;
@@ -1063,16 +1065,7 @@ function WorkflowComposer({
     if (!description.trim()) setDescription(t.description);
     setPhases(t.usable);
   };
-  const move = (i: number, d: -1 | 1) =>
-    setPhases((prev) => {
-      const next = [...prev];
-      const j = i + d;
-      if (j < 0 || j >= next.length) return prev;
-      [next[i], next[j]] = [next[j]!, next[i]!];
-      return next;
-    });
-
-  const save = async () => {
+  const save =async () => {
     const wid = id.trim();
     if (!SLUG_RE.test(wid)) {
       setError("Workflow id must be lowercase letters, digits, '-' or '_'.");
@@ -1106,213 +1099,188 @@ function WorkflowComposer({
     }
   };
 
+  const unusedPhases = pickable.filter((p) => !phases.includes(p));
   return (
-    <section className="wf-compose">
-      <div className="wf-compose__head">
-        <h3 className="workflows-pane__group-title">New workflow</h3>
-      </div>
-      <div className="wf-compose__row">
+    <div className="wf-builder">
+      <div className="wf-builder__header">
         <input
-          className="wf-input"
+          className="wf-input wf-builder__id"
           placeholder="workflow-id"
           value={id}
           onChange={(e) => setId(e.target.value)}
         />
         <input
-          className="wf-input"
+          className="wf-input wf-builder__name"
           placeholder="Display name"
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
+        <input
+          className="wf-input wf-builder__desc"
+          placeholder="Description (optional)"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
+        <div className="wf-builder__actions">
+          {lintErrors.length > 0 && (
+            <span className="wf-builder__lintchip wf-builder__lintchip--err">
+              {lintErrors.length} issue{lintErrors.length === 1 ? "" : "s"}
+            </span>
+          )}
+          <button
+            type="button"
+            className="workflow-row__run"
+            disabled={busy || lintErrors.length > 0}
+            onClick={() => void save()}
+          >
+            {busy ? "Saving…" : "Create"}
+          </button>
+          <button type="button" className="plugins-pane__ghost" onClick={onCancel}>
+            Cancel
+          </button>
+        </div>
       </div>
-      <input
-        className="wf-input"
-        placeholder="Description"
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-      />
 
-      {phases.length === 0 && templates.length > 0 && (
-        <div className="wf-templates">
-          <span className="wf-compose__label">Start from a template</span>
-          <div className="wf-templates__row">
-            {templates.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                className="wf-template"
-                onClick={() => applyTemplate(t)}
-              >
-                <span className="wf-template__name">{t.name}</span>
-                <span className="wf-template__desc">{t.description}</span>
-                <span className="wf-template__phases">
-                  {t.usable.join(" → ")}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="wf-compose__phases">
-        <div className="wf-compose__phaseshead">
-          <span className="wf-compose__label">Phases (run in order)</span>
-          <div className="wf-seg wf-seg--sm">
-            <button
-              type="button"
-              className={view === "list" ? "wf-seg__on" : ""}
-              onClick={() => setView("list")}
-            >
-              List
-            </button>
-            <button
-              type="button"
-              className={view === "canvas" ? "wf-seg__on" : ""}
-              onClick={() => setView("canvas")}
-            >
-              Canvas
-            </button>
-          </div>
-        </div>
-        {view === "canvas" ? (
-          <div className="wf-canvas-wrap">
-            <WorkflowCanvas
-              phases={phases}
-              setPhases={setPhases}
-              phaseInfo={phaseInfo}
-              availablePhases={pickable}
-              onInsert={insertPhaseAt}
-              onNewPhaseAt={(index) => {
-                setPendingInsert(index);
-                setNewPhase(true);
-              }}
-              onSelectPhase={setSelectedPhase}
-            />
-            {selectedPhase && (
-              <PhaseConfigPanel
-                repoPath={repoPath}
-                phaseId={selectedPhase}
-                agents={agents}
-                onClose={() => setSelectedPhase(null)}
-                onSaved={() => {
-                  setSelectedPhase(null);
-                  onRefresh();
-                }}
-              />
-            )}
-          </div>
-        ) : phases.length === 0 ? (
-          <div className="wf-compose__empty">No phases yet — add one below.</div>
-        ) : (
-          <ol className="wf-phaselist">
-            {phases.map((p, i) => (
-              <li key={p} className="wf-phaselist__item">
-                <span className="wf-phaselist__idx">{i + 1}</span>
-                <span className="wf-phaselist__name">{p}</span>
-                <div className="wf-phaselist__ctrls">
-                  <button type="button" onClick={() => move(i, -1)} disabled={i === 0} aria-label="Move up">↑</button>
-                  <button type="button" onClick={() => move(i, 1)} disabled={i === phases.length - 1} aria-label="Move down">↓</button>
+      <div className="wf-builder__main">
+        <aside className="wf-builder__palette">
+          {phases.length === 0 && templates.length > 0 && (
+            <div className="wf-pal-section">
+              <span className="wf-compose__label">Templates</span>
+              {templates.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className="wf-template"
+                  onClick={() => applyTemplate(t)}
+                >
+                  <span className="wf-template__name">{t.name}</span>
+                  <span className="wf-template__phases">{t.usable.join(" → ")}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="wf-pal-section wf-pal-section--grow">
+            <span className="wf-compose__label">Phases</span>
+            <div className="wf-pal-list">
+              {unusedPhases.length === 0 ? (
+                <span className="wf-pal-empty">All phases added</span>
+              ) : (
+                unusedPhases.map((p) => (
                   <button
+                    key={p}
                     type="button"
-                    onClick={() => setPhases((prev) => prev.filter((x) => x !== p))}
-                    aria-label="Remove"
+                    className="wf-pal-item"
+                    onClick={() => addPhase(p)}
+                    title="Add to workflow"
                   >
-                    ×
+                    <span className="wf-pal-item__name">{p}</span>
+                    {phaseInfo[p]?.gate && <span className="wf-pal-item__gate">⟐</span>}
+                    <span className="wf-pal-item__add">+</span>
                   </button>
-                </div>
-              </li>
-            ))}
-          </ol>
-        )}
-
-        {newPhase ? (
-          <PhaseComposer
-            repoPath={repoPath}
-            agents={agents}
-            skills={skills}
-            mcpServers={mcpServers}
-            onAgentCreated={onRefresh}
-            onSaved={(pid) => {
-              if (pendingInsert != null) insertPhaseAt(pendingInsert, pid);
-              else addPhase(pid);
-              setPendingInsert(null);
-              setNewPhase(false);
-              onRefresh(); // refresh so the new phase shows in the picker too
-            }}
-            onCancel={() => {
-              setPendingInsert(null);
-              setNewPhase(false);
-            }}
-          />
-        ) : (
-          <div className="wf-compose__add">
-            <select
-              className="wf-input"
-              value={picker}
-              onChange={(e) => addPhase(e.target.value)}
-            >
-              <option value="">+ Add existing phase…</option>
-              {pickable
-                .filter((p) => !phases.includes(p))
-                .map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-            </select>
+                ))
+              )}
+            </div>
             <button
               type="button"
-              className="plugins-pane__ghost"
-              onClick={() => setNewPhase(true)}
+              className="plugins-pane__ghost wf-pal-new"
+              onClick={() => {
+                setPendingInsert(null);
+                setNewPhase(true);
+                setSelectedPhase(null);
+              }}
             >
               + New phase
             </button>
           </div>
-        )}
+        </aside>
+
+        <div className="wf-builder__canvas">
+          <WorkflowCanvas
+            phases={phases}
+            setPhases={setPhases}
+            phaseInfo={phaseInfo}
+            availablePhases={pickable}
+            onInsert={insertPhaseAt}
+            onNewPhaseAt={(index) => {
+              setPendingInsert(index);
+              setNewPhase(true);
+              setSelectedPhase(null);
+            }}
+            onSelectPhase={(p) => {
+              setNewPhase(false);
+              setSelectedPhase(p);
+            }}
+          />
+          {newPhase && (
+            <aside className="wf-cfg">
+              <header className="wf-cfg__head">
+                <span className="wf-cfg__title">New phase</span>
+                <button
+                  type="button"
+                  className="wf-cfg__x"
+                  onClick={() => {
+                    setPendingInsert(null);
+                    setNewPhase(false);
+                  }}
+                  aria-label="Close"
+                >
+                  ×
+                </button>
+              </header>
+              <div className="wf-cfg__body">
+                <PhaseComposer
+                  repoPath={repoPath}
+                  agents={agents}
+                  skills={skills}
+                  mcpServers={mcpServers}
+                  onAgentCreated={onRefresh}
+                  onSaved={(pid) => {
+                    if (pendingInsert != null) insertPhaseAt(pendingInsert, pid);
+                    else addPhase(pid);
+                    setPendingInsert(null);
+                    setNewPhase(false);
+                    onRefresh();
+                  }}
+                  onCancel={() => {
+                    setPendingInsert(null);
+                    setNewPhase(false);
+                  }}
+                />
+              </div>
+            </aside>
+          )}
+          {!newPhase && selectedPhase && (
+            <PhaseConfigPanel
+              repoPath={repoPath}
+              phaseId={selectedPhase}
+              agents={agents}
+              onClose={() => setSelectedPhase(null)}
+              onSaved={() => {
+                setSelectedPhase(null);
+                onRefresh();
+              }}
+            />
+          )}
+        </div>
       </div>
 
       {lint.length > 0 && (
-        <div className="wf-lint">
-          <div className="wf-lint__head">
-            {lintErrors.length > 0
-              ? `${lintErrors.length} issue${lintErrors.length === 1 ? "" : "s"} to fix`
-              : "Looks good — review notices"}
-          </div>
-          <ul className="wf-lint__list">
-            {lint.map((iss, i) => (
-              <li
-                key={i}
-                className={`wf-lint__item wf-lint__item--${iss.level} ${iss.phase ? "wf-lint__item--clickable" : ""}`}
-                onClick={() => {
-                  if (iss.phase) {
-                    setView("canvas");
-                    setSelectedPhase(iss.phase);
-                  }
-                }}
-              >
-                <span className="wf-lint__dot" aria-hidden />
-                {iss.message}
-              </li>
-            ))}
-          </ul>
+        <div className="wf-builder__lint">
+          {lint.map((iss, i) => (
+            <button
+              key={i}
+              type="button"
+              className={`wf-lintchip wf-lintchip--${iss.level} ${iss.phase ? "wf-lintchip--clickable" : ""}`}
+              onClick={() => iss.phase && setSelectedPhase(iss.phase)}
+            >
+              <span className="wf-lint__dot" aria-hidden />
+              {iss.message}
+            </button>
+          ))}
         </div>
       )}
-
       {error && <div className="wf-compose__err">{error}</div>}
-      <div className="wf-compose__actions">
-        <button
-          type="button"
-          className="workflow-row__run"
-          disabled={busy || lintErrors.length > 0}
-          onClick={() => void save()}
-        >
-          {busy ? "Saving…" : "Create workflow"}
-        </button>
-        <button type="button" className="plugins-pane__ghost" onClick={onCancel}>
-          Cancel
-        </button>
-      </div>
-    </section>
+    </div>
   );
 }
 
@@ -2015,6 +1983,41 @@ export function WorkflowsView({ project }: { project: Project }) {
   }
   if (!report) return null;
 
+  // Full-bleed builder takes over the whole pane while composing.
+  if (composing) {
+    return (
+      <div className="workflows-pane workflows-pane--builder">
+        <WorkflowComposer
+          repoPath={project.repo_path?.trim() ?? ""}
+          availablePhases={report.phases.map((p) => p.id)}
+          phaseInfo={Object.fromEntries(
+            report.phases.map((p) => [
+              p.id,
+              {
+                mode: p.mode,
+                agent: p.agent,
+                gate: (p.decisionVerdicts?.length ?? 0) > 0,
+                directive: p.directive,
+              },
+            ]),
+          )}
+          existingWorkflows={report.workflows.map((w) => w.id)}
+          agents={report.agents.map((a) => ({ id: a.id }))}
+          skills={Array.from(
+            new Set(report.agents.flatMap((a) => a.skills ?? [])),
+          ).sort()}
+          mcpServers={report.mcpServers.map((m) => m.id)}
+          onSaved={() => {
+            setComposing(false);
+            void refresh();
+          }}
+          onRefresh={() => void refresh()}
+          onCancel={() => setComposing(false)}
+        />
+      </div>
+    );
+  }
+
   const counts = {
     workflows: report.workflows.length,
     phases: report.phases.length,
@@ -2120,37 +2123,7 @@ export function WorkflowsView({ project }: { project: Project }) {
         <div className="workflows-pane__toast">{runResult}</div>
       )}
 
-      {tab === "workflows" && composing && (
-        <WorkflowComposer
-          repoPath={project.repo_path?.trim() ?? ""}
-          availablePhases={report.phases.map((p) => p.id)}
-          phaseInfo={Object.fromEntries(
-            report.phases.map((p) => [
-              p.id,
-              {
-                mode: p.mode,
-                agent: p.agent,
-                gate: (p.decisionVerdicts?.length ?? 0) > 0,
-                directive: p.directive,
-              },
-            ]),
-          )}
-          existingWorkflows={report.workflows.map((w) => w.id)}
-          agents={report.agents.map((a) => ({ id: a.id }))}
-          skills={Array.from(
-            new Set(report.agents.flatMap((a) => a.skills ?? [])),
-          ).sort()}
-          mcpServers={report.mcpServers.map((m) => m.id)}
-          onSaved={() => {
-            setComposing(false);
-            void refresh();
-          }}
-          onRefresh={() => void refresh()}
-          onCancel={() => setComposing(false)}
-        />
-      )}
-
-      {tab === "workflows" && !composing && (
+      {tab === "workflows" && (
         <section className="workflows-pane__group">
           {filteredWorkflows.length === 0 ? (
             <p style={{ color: "var(--text-faint)", fontSize: 12 }}>
