@@ -532,6 +532,21 @@ export function animusOutputPhaseOutputs(
   return invoke("animus_output_phase_outputs", { path, workflowId, phaseId });
 }
 
+export interface DecisionEntry {
+  phase_id?: string | null;
+  verdict?: string | null;
+  [key: string]: unknown;
+}
+
+/** Per-run decision log: the structured values each decision phase returned
+ *  (verdict + decision_contract fields) for the workflow's latest run. */
+export function animusOutputDecisions(
+  path: string,
+  workflowId: string,
+): Promise<AnimusCliResult<{ decisions: DecisionEntry[] }>> {
+  return invoke("animus_output_decisions", { path, workflowId });
+}
+
 // --- Interactions (questions + approvals; animus >= 0.5.15) ------------------
 
 export interface InteractionQuestionOption {

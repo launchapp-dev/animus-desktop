@@ -185,6 +185,7 @@ pub fn run() {
             animus_cli::animus_cost_summary,
             animus_cli::animus_cost_workflow,
             animus_cli::animus_output_phase_outputs,
+            animus_cli::animus_output_decisions,
             workflow_yaml::local_workflows_read,
             workflow_yaml::local_workflow_file_read,
             workflow_yaml::local_mcp_server_upsert,

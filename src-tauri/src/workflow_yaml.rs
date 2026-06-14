@@ -103,6 +103,8 @@ pub struct PhaseSummary {
     pub capabilities: Vec<CapabilityFlag>,
     /// Allowed verdicts from a `decision_contract` (e.g. advance/rework/fail).
     pub decision_verdicts: Vec<String>,
+    /// Field names a decision phase returns (verdict + custom fields).
+    pub decision_fields: Vec<String>,
     pub source_file: String,
 }
 
@@ -433,14 +435,24 @@ async fn ingest_file(path: &Path, kind: FileKind, report: &mut WorkflowYamlRepor
                                 .collect()
                         })
                         .unwrap_or_default();
-                    let decision_verdicts = m
+                    let decision_fields_map = m
                         .get(Yaml::String("decision_contract".into()))
                         .and_then(|v| v.as_mapping())
                         .and_then(|dc| dc.get(Yaml::String("fields".into())))
-                        .and_then(|v| v.as_mapping())
+                        .and_then(|v| v.as_mapping());
+                    let decision_verdicts = decision_fields_map
                         .and_then(|f| f.get(Yaml::String("verdict".into())))
                         .and_then(|v| v.as_mapping())
                         .map(|vm| collect_strings(vm, "enum"))
+                        .unwrap_or_default();
+                    // Every field a decision phase RETURNS (verdict + custom
+                    // fields like skip_reason) — the phase's "return variables".
+                    let decision_fields: Vec<String> = decision_fields_map
+                        .map(|fm| {
+                            fm.keys()
+                                .filter_map(|k| k.as_str().map(String::from))
+                                .collect()
+                        })
                         .unwrap_or_default();
                     report.phases.push(PhaseSummary {
                         id: id.to_string(),
@@ -455,6 +467,7 @@ async fn ingest_file(path: &Path, kind: FileKind, report: &mut WorkflowYamlRepor
                         worktree,
                         capabilities,
                         decision_verdicts,
+                        decision_fields,
                         source_file: source_file.clone(),
                     });
                 }

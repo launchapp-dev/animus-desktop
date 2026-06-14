@@ -26,9 +26,11 @@ import {
   type WorkflowYamlReport,
 } from "../../api/workflow_yaml";
 import {
+  animusOutputDecisions,
   animusOutputPhaseOutputs,
   animusWorkflowRun,
   animusWorkflowSetRouting,
+  type DecisionEntry,
   type PhaseOutput,
   type RouteSpec,
 } from "../../api/animus";
@@ -1003,6 +1005,29 @@ export function VisualizeView({ project }: { project: Project }) {
     return [...set];
   }, [selectedPhase]);
 
+  // Actual returned decision values (verdict + contract fields) for the
+  // selected phase, from the decision log — shown when overlaying a run.
+  const [phaseDecision, setPhaseDecision] = useState<DecisionEntry | null>(null);
+  useEffect(() => {
+    const path = project.repo_path?.trim();
+    if (!path || !overlay || !selectedWfId || !selectedPhase) {
+      setPhaseDecision(null);
+      return;
+    }
+    let cancelled = false;
+    animusOutputDecisions(path, selectedWfId)
+      .then((res) => {
+        if (cancelled) return;
+        const list = res.ok && res.data ? res.data.decisions ?? [] : [];
+        const match = list.filter((d) => d.phase_id === selectedPhase.id).pop() ?? null;
+        setPhaseDecision(match);
+      })
+      .catch(() => !cancelled && setPhaseDecision(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [overlay, selectedWfId, selectedPhase, project.repo_path]);
+
   // Persisted output this phase produced (the data downstream phases read).
   const [phaseOut, setPhaseOut] = useState<string | null>(null);
   useEffect(() => {
@@ -1236,6 +1261,18 @@ export function VisualizeView({ project }: { project: Project }) {
                   </span>
                 </div>
               )}
+              {(selectedPhase.decisionFields?.length ?? 0) > 0 && (
+                <div className="rt-row">
+                  <span className="rt-row__role">returns</span>
+                  <span className="wf-cfg__chips" title="structured fields this decision phase returns">
+                    {selectedPhase.decisionFields.map((f) => (
+                      <span key={f} className="wf-cfg__chip wf-cfg__chip--ret">
+                        {f}
+                      </span>
+                    ))}
+                  </span>
+                </div>
+              )}
               {selectedPhase.directive && (
                 <div className="sk-detail__section">
                   <div className="sk-detail__label">Directive</div>
@@ -1287,6 +1324,24 @@ export function VisualizeView({ project }: { project: Project }) {
                         <div className="rt-row">
                           <span className="rt-row__role">took</span>
                           <span className="rt-row__name">{formatDuration(detail.durationMs)}</span>
+                        </div>
+                      )}
+                      {phaseDecision &&
+                        Object.entries(phaseDecision).filter(
+                          ([k]) => k !== "phase_id" && k !== "verdict",
+                        ).length > 0 && (
+                        <div className="rf-returns">
+                          <div className="sk-detail__label">Returned values</div>
+                          {Object.entries(phaseDecision)
+                            .filter(([k]) => k !== "phase_id" && k !== "verdict")
+                            .map(([k, val]) => (
+                              <div key={k} className="rf-returns__row">
+                                <span className="rf-returns__key">{k}</span>
+                                <span className="rf-returns__val">
+                                  {typeof val === "string" ? val : JSON.stringify(val)}
+                                </span>
+                              </div>
+                            ))}
                         </div>
                       )}
                       {detail?.error && (

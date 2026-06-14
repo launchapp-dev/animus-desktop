@@ -2663,6 +2663,18 @@ a {
 .wf-cfg__chip--rework { color: var(--brass); }
 .wf-cfg__chip--reject, .wf-cfg__chip--fail { color: var(--red); }
 .wf-cfg__chip--var { color: var(--copper); background: var(--copper-bg-soft); border-color: var(--copper); }
+.wf-cfg__chip--ret { color: var(--green); background: var(--green-bg); border-color: var(--green); }
+.rf-returns { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
+.rf-returns__row {
+  display: flex;
+  gap: 8px;
+  padding: 4px 7px;
+  background: var(--surface-1);
+  border: var(--hairline) solid var(--border);
+  border-radius: 6px;
+}
+.rf-returns__key { flex: 0 0 38%; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); word-break: break-word; }
+.rf-returns__val { flex: 1; font-size: 11px; color: var(--text); word-break: break-word; }
 .wf-source--output { max-height: 260px; white-space: pre-wrap; word-break: break-word; }
 .rf-runpick { display: inline-flex; align-items: center; gap: 6px; }
 .rf-runpick__label {

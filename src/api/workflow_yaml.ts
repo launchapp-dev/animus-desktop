@@ -55,6 +55,7 @@ export interface PhaseSummary {
   worktree: boolean | null;
   capabilities: CapabilityFlag[];
   decisionVerdicts: string[];
+  decisionFields: string[];
   sourceFile: string;
 }
 

@@ -883,6 +883,20 @@ pub async fn animus_output_phase_outputs(
     run_animus_json(&path, &args).await
 }
 
+/// Read the per-run decision log (decisions.jsonl) — the actual structured
+/// values each decision phase RETURNED (verdict + contract fields) for a run.
+#[tauri::command]
+pub async fn animus_output_decisions(
+    path: String,
+    workflow_id: String,
+) -> Result<AnimusCliResult, String> {
+    let wid = workflow_id.trim();
+    if wid.is_empty() {
+        return Err("workflow id is required".to_string());
+    }
+    run_animus_json(&path, &["output", "decisions", "--workflow-id", wid]).await
+}
+
 /// Approve or reject a pending workflow phase gate. `note` is required by the
 /// CLI for reject; approve defaults it.
 #[tauri::command]
