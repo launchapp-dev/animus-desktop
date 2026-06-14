@@ -8,17 +8,24 @@ vi.mock("../../api/_invoke", () => ({
 }));
 vi.mock("../../api/animus", () => ({
   animusFlavorCurrent: vi.fn(),
+  animusFlavorList: vi.fn(),
+  animusFlavorInstall: vi.fn(),
 }));
 
 import { PluginsView } from "./PluginsView";
 import { pluginList, pluginInstall } from "../../api/_invoke";
-import { animusFlavorCurrent, type FlavorCurrent } from "../../api/animus";
+import {
+  animusFlavorCurrent,
+  animusFlavorList,
+  type FlavorCurrent,
+} from "../../api/animus";
 import type { Plugin, Project } from "../../types/contracts";
 
 const project = { id: "p1", repo_path: "/tmp/proj" } as unknown as Project;
 const listMock = vi.mocked(pluginList);
 const installMock = vi.mocked(pluginInstall);
 const flavorMock = vi.mocked(animusFlavorCurrent);
+const flavorListMock = vi.mocked(animusFlavorList);
 
 const flavor: FlavorCurrent = {
   name: "default",
@@ -47,6 +54,12 @@ function flavorOk(data: FlavorCurrent) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  flavorListMock.mockResolvedValue({
+    ok: true,
+    data: { flavors: [{ name: "default", available: true, title: "Animus Default", version: "0.5.0", description: "" }] },
+    error: null,
+    rawStderr: "",
+  });
 });
 
 describe("PluginsView (flavor runtime)", () => {
