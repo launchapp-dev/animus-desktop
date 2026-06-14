@@ -162,6 +162,33 @@ export async function logsTail(
   return await invoke("logs_tail", { limit, projectRoot });
 }
 
-export async function daemonHealth(projectRoot?: string): Promise<unknown> {
-  return await invoke("daemon_health", { projectRoot });
+export interface DaemonHealth {
+  healthy: boolean;
+  status: string;
+  runner_connected: boolean;
+  runner_pid: number | null;
+  provider_plugins_healthy: boolean;
+  active_agents: number;
+  pool_size: number;
+  project_root?: string;
+  daemon_pid: number | null;
+  process_alive: boolean;
+  pool_utilization_percent: number;
+  queued_tasks: number;
+  flavor: string;
+  runtime_paused: boolean;
+}
+
+interface HealthEnvelope {
+  ok?: boolean;
+  data?: DaemonHealth;
+  error?: unknown;
+}
+
+export async function daemonHealth(
+  projectRoot?: string,
+): Promise<DaemonHealth | null> {
+  const res = (await invoke("daemon_health", { projectRoot })) as HealthEnvelope;
+  if (res && res.ok && res.data) return res.data;
+  return null;
 }

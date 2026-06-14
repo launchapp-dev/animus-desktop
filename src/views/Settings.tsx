@@ -22,6 +22,7 @@ import {
   type DaemonConfigData,
   type DaemonConfigUpdate,
 } from "../api/animus";
+import { daemonHealth, type DaemonHealth } from "../api/subject";
 import { useAuthStore } from "../state/auth";
 import { useDaemonStore } from "../state/daemon";
 import { useThemeStore } from "../state/theme";
@@ -492,6 +493,7 @@ function envelopeError(err: unknown): string {
 export function DaemonView({ project }: { project: Project }) {
   const path = project.repo_path?.trim() ?? "";
   const [status, setStatus] = useState<DaemonStatus | null>(null);
+  const [health, setHealth] = useState<DaemonHealth | null>(null);
   const [config, setConfig] = useState<DaemonConfigData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -522,11 +524,13 @@ export function DaemonView({ project }: { project: Project }) {
     setBusy("refresh");
     setError(null);
     try {
-      const [st, cfg] = await Promise.all([
+      const [st, cfg, hl] = await Promise.all([
         daemonStatus(path),
         animusDaemonConfigGet(path),
+        daemonHealth(path).catch(() => null),
       ]);
       setStatus(st);
+      setHealth(hl);
       if (cfg.ok && cfg.data) {
         seedForm(cfg.data);
       } else {
@@ -558,6 +562,7 @@ export function DaemonView({ project }: { project: Project }) {
             ? await daemonStop(path)
             : await daemonRestart(path);
       setStatus(st);
+      void daemonHealth(path).then(setHealth).catch(() => {});
     } catch (e) {
       setError(String(e));
     } finally {
@@ -684,6 +689,91 @@ export function DaemonView({ project }: { project: Project }) {
           </Button>
         </div>
       </section>
+
+      {health && (
+        <section className="card">
+          <div className="card__head">
+            <h2 className="card__title">Health</h2>
+            <Badge
+              tone={
+                health.healthy
+                  ? "running"
+                  : health.runtime_paused
+                    ? "warn"
+                    : "failed"
+              }
+              dot
+            >
+              {health.runtime_paused
+                ? "Paused"
+                : health.healthy
+                  ? "Healthy"
+                  : health.status || "Unhealthy"}
+            </Badge>
+          </div>
+          <div className="health-grid">
+            <div className="health-tile">
+              <span className="health-tile__label">Pool</span>
+              <span className="health-tile__value mono">
+                {health.active_agents}/{health.pool_size}
+              </span>
+              <span className="health-tile__hint">active agents</span>
+            </div>
+            <div className="health-tile">
+              <span className="health-tile__label">Utilization</span>
+              <span className="health-tile__value mono">
+                {Math.round(health.pool_utilization_percent)}%
+              </span>
+              <span className="health-bar">
+                <span
+                  className="health-bar__fill"
+                  style={{
+                    width: `${Math.min(100, Math.max(0, health.pool_utilization_percent))}%`,
+                  }}
+                />
+              </span>
+            </div>
+            <div className="health-tile">
+              <span className="health-tile__label">Queued</span>
+              <span className="health-tile__value mono">
+                {health.queued_tasks}
+              </span>
+              <span className="health-tile__hint">tasks waiting</span>
+            </div>
+            <div className="health-tile">
+              <span className="health-tile__label">Runner</span>
+              <span
+                className={`health-tile__value ${
+                  health.runner_connected ? "is-ok" : "is-bad"
+                }`}
+              >
+                {health.runner_connected ? "Connected" : "Disconnected"}
+              </span>
+              <span className="health-tile__hint mono">
+                {health.runner_pid != null ? `pid ${health.runner_pid}` : "—"}
+              </span>
+            </div>
+            <div className="health-tile">
+              <span className="health-tile__label">Providers</span>
+              <span
+                className={`health-tile__value ${
+                  health.provider_plugins_healthy ? "is-ok" : "is-bad"
+                }`}
+              >
+                {health.provider_plugins_healthy ? "Healthy" : "Degraded"}
+              </span>
+              <span className="health-tile__hint">plugin runners</span>
+            </div>
+            <div className="health-tile">
+              <span className="health-tile__label">Flavor</span>
+              <span className="health-tile__value mono">{health.flavor}</span>
+              <span className="health-tile__hint">
+                {health.process_alive ? "process alive" : "process down"}
+              </span>
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="card">
         <div className="card__head">

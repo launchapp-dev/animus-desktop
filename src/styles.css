@@ -7794,6 +7794,46 @@ textarea.wf-input { font-family: var(--font-mono); font-size: 11.5px; resize: ve
 .journal-cost__meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); }
 .rundetail__cost { font-family: var(--font-mono); font-size: 11px; color: var(--phosphor); }
 
+/* Daemon health grid */
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-top: 4px;
+}
+.health-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.health-tile__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.health-tile__value { font-size: 18px; font-weight: 600; color: var(--text); }
+.health-tile__value.is-ok { color: var(--phosphor); }
+.health-tile__value.is-bad { color: var(--red); }
+.health-tile__hint { font-size: 11px; color: var(--text-faint); }
+.health-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.health-bar__fill {
+  display: block;
+  height: 100%;
+  background: var(--copper);
+  transition: width 0.3s ease;
+}
+
 /* Phase gate bar (paused runs in Journal) */
 .gate-bar {
   display: flex;
