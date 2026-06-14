@@ -482,6 +482,37 @@ pub async fn animus_skill_delete(path: String, name: String) -> Result<(), Strin
     std::fs::remove_file(&target).map_err(|e| e.to_string())
 }
 
+/// Resume a paused (or crash-recovered) workflow run, respawning its runner.
+#[tauri::command]
+pub async fn animus_workflow_resume(
+    path: String,
+    workflow_id: String,
+    force: bool,
+) -> Result<AnimusCliResult, String> {
+    let wid = workflow_id.trim();
+    if wid.is_empty() {
+        return Err("workflow id is required".to_string());
+    }
+    let mut args: Vec<&str> = vec!["workflow", "resume", "--id", wid];
+    if force {
+        args.push("--force");
+    }
+    run_animus_json(&path, &args).await
+}
+
+/// Per-phase token + USD cost breakdown for a single workflow run id.
+#[tauri::command]
+pub async fn animus_cost_workflow(
+    path: String,
+    run_id: String,
+) -> Result<AnimusCliResult, String> {
+    let rid = run_id.trim();
+    if rid.is_empty() {
+        return Err("run id is required".to_string());
+    }
+    run_animus_json(&path, &["cost", "workflow", rid]).await
+}
+
 /// Approve or reject a pending workflow phase gate. `note` is required by the
 /// CLI for reject; approve defaults it.
 #[tauri::command]

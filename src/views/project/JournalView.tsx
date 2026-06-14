@@ -15,7 +15,7 @@ import {
   type WorkflowRunSummary,
   type HistoricalEvent,
 } from "../../api/event_log";
-import { animusPhaseGate } from "../../api/animus";
+import { animusPhaseGate, animusWorkflowResume } from "../../api/animus";
 import type { Project } from "../../types/contracts";
 import {
   ALL_CATS,
@@ -164,6 +164,59 @@ function buildTranscript(events: HistoricalEvent[]): NormalizedEvent[] {
 /** Approve/Reject controls for a run paused on a phase gate. The CLI applies
  *  the decision to the named phase of the paused workflow; reject requires a
  *  note. Shown only while the run reports `paused`. */
+/** Resume a paused / failed / cancelled run — respawns the runner at the
+ *  paused phase (CLI `workflow resume`). */
+function ResumeBar({
+  run,
+  repoPath,
+  onResumed,
+}: {
+  run: WorkflowRunSummary;
+  repoPath: string;
+  onResumed: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const resume = async (force: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await animusWorkflowResume(repoPath, run.wfUuid, force);
+      if (res.ok) onResumed();
+      else setError(res.rawStderr || "resume failed");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="gate-bar">
+      <span className="gate-bar__label">
+        {run.status === "paused" ? "Paused" : run.status} — resume the run
+      </span>
+      <button
+        type="button"
+        className="ix-allow"
+        disabled={busy}
+        onClick={() => void resume(false)}
+      >
+        {busy ? "Resuming…" : "Resume"}
+      </button>
+      <button
+        type="button"
+        className="plugins-pane__ghost"
+        disabled={busy}
+        title="Bypass idempotency block and retry the phase"
+        onClick={() => void resume(true)}
+      >
+        Force retry
+      </button>
+      {error && <span className="gate-bar__error">{error}</span>}
+    </div>
+  );
+}
+
 function PhaseGateBar({
   run,
   repoPath,
@@ -317,6 +370,12 @@ function RunDetail({
       {run.status === "paused" && repoPath && (
         <PhaseGateBar run={run} repoPath={repoPath} onDecided={onGateDecided} />
       )}
+      {(run.status === "paused" ||
+        run.status === "failed" ||
+        run.status === "cancelled") &&
+        repoPath && (
+          <ResumeBar run={run} repoPath={repoPath} onResumed={onGateDecided} />
+        )}
       {loading ? (
         <p style={{ color: "var(--text-muted)", fontSize: 12, paddingTop: 12 }}>
           Loading transcript…

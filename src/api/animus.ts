@@ -379,6 +379,27 @@ export function animusPhaseGate(args: {
   });
 }
 
+/** Resume a paused / crash-recovered workflow run (respawns its runner). */
+export function animusWorkflowResume(
+  path: string,
+  workflowId: string,
+  force = false,
+): Promise<AnimusCliResult<unknown>> {
+  return invoke<AnimusCliResult<unknown>>("animus_workflow_resume", {
+    path,
+    workflowId,
+    force,
+  });
+}
+
+/** Per-phase token + USD cost for a workflow run id. */
+export function animusCostWorkflow(
+  path: string,
+  runId: string,
+): Promise<AnimusCliResult<unknown>> {
+  return invoke<AnimusCliResult<unknown>>("animus_cost_workflow", { path, runId });
+}
+
 // --- Interactions (questions + approvals; animus >= 0.5.15) ------------------
 
 export interface InteractionQuestionOption {
