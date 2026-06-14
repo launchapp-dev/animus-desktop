@@ -2499,6 +2499,7 @@ a {
 .react-flow__node:hover .rf-handle--loop { opacity: 0.6; }
 
 .rf-phase-node {
+  position: relative;
   background: var(--bg-elevated);
   border: var(--hairline) solid var(--border-strong);
   border-radius: var(--radius);
@@ -2570,6 +2571,38 @@ a {
   gap: 4px;
 }
 .rf-spin { animation: spin 0.9s linear infinite; flex-shrink: 0; }
+/* Run-overlay: faded phases the selected run didn't touch + rework attempt badge */
+.rf-phase-node--dim { opacity: 0.32; filter: grayscale(0.4); }
+.rf-phase-node__attempts {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent-fg);
+  background: var(--yellow);
+  border-radius: 999px;
+  padding: 1px 6px;
+  z-index: 2;
+}
+.rf-runpick { display: inline-flex; align-items: center; gap: 6px; }
+.rf-runpick__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.rf-runpick__select {
+  font-size: 11.5px;
+  color: var(--text);
+  background: var(--surface-1);
+  border: var(--hairline) solid var(--border);
+  border-radius: 8px;
+  padding: 4px 7px;
+  max-width: 240px;
+}
 /* Grid-of-runs (runs × phases matrix) */
 .rf-grid { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
 .rf-grid--empty { display: flex; align-items: center; justify-content: center; color: var(--text-faint); font-size: 12px; }

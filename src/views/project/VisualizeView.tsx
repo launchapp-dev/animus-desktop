@@ -62,6 +62,10 @@ interface PhaseNodeData extends Record<string, unknown> {
   agent: string | null;
   workflowRef: string | null;
   liveState?: AgentState | null;
+  /** Run-overlay: phase not exercised by the selected run (render faded). */
+  dimmed?: boolean;
+  /** Run-overlay: times this phase ran in the selected run (>1 = rework). */
+  attempts?: number;
 }
 interface WorkflowNodeData extends Record<string, unknown> {
   name: string;
@@ -93,9 +97,14 @@ function PhaseNode({ data }: NodeProps) {
   const liveColor = live ? LIVE_COLOR[live] : null;
   return (
     <div
-      className={`rf-phase-node ${live ? "rf-phase-node--live" : ""}`}
+      className={`rf-phase-node ${live ? "rf-phase-node--live" : ""} ${d.dimmed ? "rf-phase-node--dim" : ""}`}
       style={liveColor ? { borderColor: liveColor } : undefined}
     >
+      {!!d.attempts && d.attempts > 1 && (
+        <span className="rf-phase-node__attempts" title={`Ran ${d.attempts}× in this run (rework)`}>
+          ×{d.attempts}
+        </span>
+      )}
       <Handle type="target" position={Position.Left} className="rf-handle" />
       <div className="rf-phase-node__head">
         {live === "running" || live === "thinking" ? (
@@ -197,14 +206,33 @@ const NODE_TYPES = {
   trigger: TriggerNode,
 };
 
+interface RunOverlay {
+  /** phase value -> number of times it executed in the selected run. */
+  attempts: Map<string, number>;
+  taken: Set<string>;
+}
+
 function buildGraph(
   report: WorkflowYamlReport,
   agentStates: Record<string, AgentState>,
   runningWf: string | null,
   onRun: (id: string) => void,
+  overlay: RunOverlay | null,
 ): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = [];
   const edges: Edge[] = [];
+  const dimEdge = (e: Edge): Edge =>
+    overlay
+      ? {
+          ...e,
+          animated: false,
+          style: {
+            ...(e.style ?? {}),
+            opacity: 0.22,
+            strokeDasharray: "4 4",
+          },
+        }
+      : e;
 
   const ROW_HEIGHT = 170;
   const PHASE_GAP = 220;
@@ -253,6 +281,8 @@ function buildGraph(
       const isRef = p.kind === "workflow-ref";
       const live = ps?.agent ? agentStates[ps.agent] ?? null : null;
       const isActive = live === "running" || live === "thinking";
+      const taken = !overlay || overlay.taken.has(key);
+      const attempts = overlay?.attempts.get(key) ?? 0;
       nodes.push({
         id: phaseNodeId,
         type: "phase",
@@ -262,12 +292,14 @@ function buildGraph(
           mode: isRef ? "ref" : ps?.mode ?? null,
           agent: ps?.agent ?? null,
           workflowRef: isRef ? key : null,
-          liveState: live,
+          liveState: overlay ? null : live,
+          dimmed: overlay ? !taken : false,
+          attempts: attempts > 1 ? attempts : 0,
         } as PhaseNodeData,
       });
       // The spine edge lights up (copper + animated) when the phase it feeds
       // into is the one currently running — the "data flowing in" cue.
-      edges.push({
+      const spine: Edge = {
         id: `${prev}->${phaseNodeId}`,
         source: prev,
         target: phaseNodeId,
@@ -280,7 +312,8 @@ function buildGraph(
           stroke: isActive ? "var(--copper)" : "var(--border-strong)",
           strokeWidth: isActive ? 1.75 : 1.25,
         },
-      });
+      };
+      edges.push(taken ? spine : dimEdge(spine));
       phaseNodeByValue.set(key, phaseNodeId);
       phaseIdxByValue.set(key, pIdx);
       // Every on_verdict route with a target phase becomes a branch edge.
@@ -326,7 +359,7 @@ function buildGraph(
           : v === "approve" || v === "advance" || v === "pass"
             ? "var(--green)"
             : "var(--copper)";
-      edges.push({
+      const branchEdge: Edge = {
         id: `branch:${spec.from}:${v}->${targetNode}`,
         source: spec.from,
         target: targetNode,
@@ -343,7 +376,16 @@ function buildGraph(
         labelStyle: { fill: color, fontSize: 10 },
         labelBgStyle: { fill: "var(--bg-elevated)", fillOpacity: 0.9 },
         markerEnd: { type: MarkerType.ArrowClosed, color },
-      });
+      };
+      // In a run overlay, dim any branch whose source or target phase the run
+      // didn't exercise — leaving the route actually taken at full strength.
+      const bothTaken =
+        !overlay ||
+        (overlay.taken.has(spec.target) &&
+          [...overlay.attempts.keys()].length > 0 &&
+          // source phase value is encoded in the node id suffix
+          overlay.taken.has(spec.from.split(":").pop() ?? ""));
+      edges.push(bothTaken ? branchEdge : dimEdge(branchEdge));
     }
   });
 
@@ -617,6 +659,7 @@ export function VisualizeView({ project }: { project: Project }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [gridMode, setGridMode] = useState(false);
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
+  const [overlayRun, setOverlayRun] = useState<string | null>(null);
   const [now] = useState(() => Date.now());
   const agentStates = useProjectAgentLiveStates(project.id);
 
@@ -668,11 +711,22 @@ export function VisualizeView({ project }: { project: Project }) {
     };
   }, [project.repo_path]);
 
+  // When a past run is selected, build a per-phase attempt count + a taken-set
+  // to overlay on the definition graph (dim untaken, badge reworked phases).
+  const overlay = useMemo((): RunOverlay | null => {
+    if (!overlayRun) return null;
+    const run = runs.find((r) => r.wfUuid === overlayRun);
+    if (!run) return null;
+    const attempts = new Map<string, number>();
+    for (const p of run.phases) attempts.set(p, (attempts.get(p) ?? 0) + 1);
+    return { attempts, taken: new Set(run.phases) };
+  }, [overlayRun, runs]);
+
   const { nodes, edges } = useMemo(() => {
     if (!report) return { nodes: [] as Node[], edges: [] as Edge[] };
-    return buildGraph(report, agentStates, running, runWorkflow);
+    return buildGraph(report, agentStates, running, runWorkflow, overlay);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report, agentStates, running]);
+  }, [report, agentStates, running, overlay]);
 
   const reloadReport = () => {
     const path = project.repo_path?.trim();
@@ -772,7 +826,27 @@ export function VisualizeView({ project }: { project: Project }) {
         {runMsg && (
           <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{runMsg}</span>
         )}
-        <div className="wf-seg wf-seg--sm" style={{ marginLeft: "auto" }}>
+        {!gridMode && runs.length > 0 && (
+          <label className="rf-runpick" style={{ marginLeft: "auto" }}>
+            <span className="rf-runpick__label">Overlay run</span>
+            <select
+              className="rf-runpick__select"
+              value={overlayRun ?? ""}
+              onChange={(e) => setOverlayRun(e.target.value || null)}
+            >
+              <option value="">Definition (no run)</option>
+              {runs.slice(0, 40).map((r) => (
+                <option key={r.wfUuid} value={r.wfUuid}>
+                  {(r.workflowRef ?? "run")} · {r.status} · {relTime(now, r.startedMs)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <div
+          className="wf-seg wf-seg--sm"
+          style={gridMode || runs.length === 0 ? { marginLeft: "auto" } : undefined}
+        >
           <button
             type="button"
             className={!gridMode ? "wf-seg__on" : ""}
