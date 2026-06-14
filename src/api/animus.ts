@@ -426,6 +426,36 @@ export function animusWorkflowSetRework(
   return invoke<void>("animus_workflow_set_rework", { path, workflowId, targets });
 }
 
+export interface RouteSpec {
+  /** Decision verdict this route fires on (e.g. approve, rework, reject). */
+  verdict: string;
+  /** Target phase to jump to. Mutually exclusive with `action`. */
+  target?: string | null;
+  /** Terminal action (e.g. halt, fail, complete). Mutually exclusive with `target`. */
+  action?: string | null;
+}
+
+export interface PhaseRouting {
+  phase: string;
+  maxAttempts?: number | null;
+  routes: RouteSpec[];
+}
+
+/** Set arbitrary per-phase on_verdict routing on a project-created workflow.
+ *  Generalizes {@link animusWorkflowSetRework} to any verdict → phase / action
+ *  mapping. Writes the inline config into the generated overlay. */
+export function animusWorkflowSetRouting(
+  path: string,
+  workflowId: string,
+  phasesRouting: PhaseRouting[],
+): Promise<void> {
+  return invoke<void>("animus_workflow_set_routing", {
+    path,
+    workflowId,
+    phasesRouting,
+  });
+}
+
 /** Resume a paused / crash-recovered workflow run (respawns its runner). */
 export function animusWorkflowResume(
   path: string,

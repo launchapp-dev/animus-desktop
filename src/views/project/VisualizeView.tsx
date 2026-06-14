@@ -12,14 +12,20 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
+  invalidateLocalWorkflowsCache,
   localWorkflowsRead,
+  type BranchRoute,
   type PhaseSummary,
   type ScheduleSummary,
   type TriggerSummary,
   type WorkflowSummary,
   type WorkflowYamlReport,
 } from "../../api/workflow_yaml";
-import { animusWorkflowRun } from "../../api/animus";
+import {
+  animusWorkflowRun,
+  animusWorkflowSetRouting,
+  type RouteSpec,
+} from "../../api/animus";
 import {
   localWorkflowRuns,
   type WorkflowRunSummary,
@@ -382,6 +388,164 @@ function GridOfRuns({ runs, now }: { runs: WorkflowRunSummary[]; now: number }) 
   );
 }
 
+type RouteChoice =
+  | { kind: "default" }
+  | { kind: "phase"; value: string };
+
+function routeToChoice(b: BranchRoute | undefined): RouteChoice {
+  if (!b) return { kind: "default" };
+  if (b.target) return { kind: "phase", value: b.target };
+  return { kind: "default" };
+}
+
+/** Per-verdict routing editor for one phase of a project-created workflow.
+ *  Each decision verdict maps to: continue normally (the engine's default —
+ *  advance on approve, halt on reject), or jump back/forward to a named phase.
+ *  Saves the full on_verdict map via set_routing. (animus 0.5.14 routes accept
+ *  only a phase `target`; terminal verdicts are expressed by leaving them
+ *  on the default.) */
+function RoutingEditor({
+  path,
+  workflowId,
+  phaseId,
+  verdicts,
+  phaseOptions,
+  current,
+  maxAttempts,
+  onSaved,
+}: {
+  path: string;
+  workflowId: string;
+  phaseId: string;
+  verdicts: string[];
+  phaseOptions: string[];
+  current: BranchRoute[];
+  maxAttempts: number | null;
+  onSaved: () => void;
+}) {
+  const initial = useMemo(() => {
+    const byVerdict = new Map(current.map((b) => [b.verdict, b]));
+    const m: Record<string, RouteChoice> = {};
+    for (const v of verdicts) m[v] = routeToChoice(byVerdict.get(v));
+    return m;
+  }, [current, verdicts]);
+
+  const [choices, setChoices] = useState<Record<string, RouteChoice>>(initial);
+  const [maxAttemptsInput, setMaxAttemptsInput] = useState(
+    maxAttempts != null ? String(maxAttempts) : "",
+  );
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    setChoices(initial);
+    setMaxAttemptsInput(maxAttempts != null ? String(maxAttempts) : "");
+    setMsg(null);
+  }, [initial, maxAttempts, phaseId]);
+
+  const hasRework = Object.entries(choices).some(
+    ([v, c]) => v === "rework" && c.kind !== "default",
+  );
+
+  function setChoice(verdict: string, value: string) {
+    setChoices((prev) => {
+      const choice: RouteChoice =
+        value === "__default"
+          ? { kind: "default" }
+          : { kind: "phase", value: value.slice("phase:".length) };
+      return { ...prev, [verdict]: choice };
+    });
+  }
+
+  function choiceValue(c: RouteChoice): string {
+    if (c.kind === "default") return "__default";
+    return `phase:${c.value}`;
+  }
+
+  async function save() {
+    setBusy(true);
+    setMsg(null);
+    const routes: RouteSpec[] = [];
+    for (const v of verdicts) {
+      const c = choices[v];
+      if (!c || c.kind === "default") continue;
+      routes.push({ verdict: v, target: c.value });
+    }
+    const max = Number.parseInt(maxAttemptsInput, 10);
+    try {
+      await animusWorkflowSetRouting(path, workflowId, [
+        {
+          phase: phaseId,
+          maxAttempts: Number.isFinite(max) && max > 0 ? max : null,
+          routes,
+        },
+      ]);
+      invalidateLocalWorkflowsCache(path);
+      setMsg("Saved.");
+      onSaved();
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="sk-detail__section wf-route">
+      <div className="sk-detail__label">Branch routing</div>
+      {verdicts.map((v) => (
+        <label key={v} className="wf-route__row">
+          <span className={`wf-route__verdict wf-route__verdict--${v.toLowerCase()}`}>
+            {v}
+          </span>
+          <select
+            className="wf-route__select"
+            value={choiceValue(choices[v] ?? { kind: "default" })}
+            onChange={(e) => setChoice(v, e.target.value)}
+            disabled={busy}
+          >
+            <option value="__default">↦ default (advance / halt)</option>
+            <optgroup label="Jump to phase">
+              {phaseOptions.map((pid) => (
+                <option key={pid} value={`phase:${pid}`}>
+                  → {pid}
+                  {pid === phaseId ? " (loop)" : ""}
+                </option>
+              ))}
+            </optgroup>
+          </select>
+        </label>
+      ))}
+      {hasRework && (
+        <label className="wf-route__row">
+          <span className="wf-route__verdict">max rework</span>
+          <input
+            className="wf-route__select"
+            type="number"
+            min={1}
+            value={maxAttemptsInput}
+            onChange={(e) => setMaxAttemptsInput(e.target.value)}
+            placeholder="∞"
+            disabled={busy}
+            style={{ width: 80 }}
+          />
+        </label>
+      )}
+      <div className="wf-route__foot">
+        {msg && <span className="wf-route__msg">{msg}</span>}
+        <button
+          type="button"
+          className="workflow-row__run"
+          onClick={() => void save()}
+          disabled={busy}
+        >
+          {busy ? "Saving…" : "Save routing"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function VisualizeView({ project }: { project: Project }) {
   const [report, setReport] = useState<WorkflowYamlReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -448,7 +612,44 @@ export function VisualizeView({ project }: { project: Project }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report, agentStates, running]);
 
+  const reloadReport = () => {
+    const path = project.repo_path?.trim();
+    if (!path) return;
+    invalidateLocalWorkflowsCache(path);
+    localWorkflowsRead(path)
+      .then(setReport)
+      .catch((e) => setError(String(e)));
+  };
+
   const selectedPhase = report?.phases.find((p) => p.id === selected) ?? null;
+
+  // The (editable, project-created) workflow this phase belongs to, plus the
+  // phase ids available as branch targets. Routing is only writable on the
+  // generated overlay produced by the desktop builder.
+  const routingCtx = (() => {
+    if (!report || !selectedPhase) return null;
+    const verdicts = selectedPhase.decisionVerdicts ?? [];
+    if (verdicts.length === 0) return null;
+    const wf = report.workflows.find((w) =>
+      w.phases.some((p) => p.kind === "phase" && p.value === selectedPhase.id),
+    );
+    if (!wf) return null;
+    const editable = wf.sourceFile.endsWith("generated-workflow.yaml");
+    const ref = wf.phases.find(
+      (p) => p.kind === "phase" && p.value === selectedPhase.id,
+    );
+    const phaseOptions = wf.phases
+      .filter((p) => p.kind === "phase")
+      .map((p) => p.value);
+    return {
+      workflowId: wf.id,
+      editable,
+      verdicts,
+      phaseOptions,
+      current: ref?.branches ?? [],
+      maxAttempts: ref?.maxReworkAttempts ?? null,
+    };
+  })();
 
   if (loading && !report) {
     return (
@@ -586,12 +787,25 @@ export function VisualizeView({ project }: { project: Project }) {
               >
                 Open run in Journal →
               </button>
-              {(selectedPhase.decisionVerdicts?.length ?? 0) > 0 && (
-                <p className="aj-muted" style={{ fontSize: 11 }}>
-                  This phase has a decision gate — approve/reject a paused run from
-                  the Journal tab.
-                </p>
-              )}
+              {routingCtx &&
+                (routingCtx.editable ? (
+                  <RoutingEditor
+                    path={project.repo_path?.trim() ?? ""}
+                    workflowId={routingCtx.workflowId}
+                    phaseId={selectedPhase.id}
+                    verdicts={routingCtx.verdicts}
+                    phaseOptions={routingCtx.phaseOptions}
+                    current={routingCtx.current}
+                    maxAttempts={routingCtx.maxAttempts}
+                    onSaved={reloadReport}
+                  />
+                ) : (
+                  <p className="aj-muted" style={{ fontSize: 11 }}>
+                    This phase has a decision gate ({routingCtx.verdicts.join(", ")}).
+                    Routing is only editable on workflows created in this project's
+                    builder.
+                  </p>
+                ))}
             </div>
           </aside>
         )}

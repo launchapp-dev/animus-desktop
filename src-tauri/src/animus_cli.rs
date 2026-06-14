@@ -621,6 +621,163 @@ pub async fn animus_workflow_set_rework(
     Ok(())
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteSpec {
+    /// The decision verdict this route fires on (e.g. `approve`, `rework`, `reject`).
+    pub verdict: String,
+    /// Target phase to jump to. Mutually exclusive with `action`.
+    pub target: Option<String>,
+    /// Terminal action (e.g. `halt`, `fail`, `complete`). Mutually exclusive with `target`.
+    pub action: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhaseRouting {
+    pub phase: String,
+    pub max_attempts: Option<u32>,
+    /// Full set of `on_verdict` routes for this phase. Empty → revert to a
+    /// bare phase id (no routing).
+    pub routes: Vec<RouteSpec>,
+}
+
+/// Set arbitrary per-phase `on_verdict` routing on a project-created workflow by
+/// rewriting its phase entries to the inline `{phase: {max_rework_attempts,
+/// on_verdict: {<verdict>: {target | action}}}}` form. This generalizes
+/// `set_rework` to any verdict → phase / terminal-action mapping. `definitions
+/// upsert` rejects inline routing, so the desktop writes it into
+/// `.animus/workflows/generated-workflow.yaml` directly.
+#[tauri::command]
+pub async fn animus_workflow_set_routing(
+    path: String,
+    workflow_id: String,
+    phases_routing: Vec<PhaseRouting>,
+) -> Result<(), String> {
+    use serde_yaml::{Mapping, Value as Yaml};
+    let repo = PathBuf::from(path.trim());
+    if !repo.is_dir() {
+        return Err(format!("project path not found: {}", repo.display()));
+    }
+    let wid = workflow_id.trim().to_string();
+    if wid.is_empty() {
+        return Err("workflow id is required".to_string());
+    }
+    let file = repo
+        .join(".animus")
+        .join("workflows")
+        .join("generated-workflow.yaml");
+    let content = std::fs::read_to_string(&file)
+        .map_err(|_| "routing can only be set on workflows created in this project".to_string())?;
+    let mut doc: Yaml =
+        serde_yaml::from_str(&content).map_err(|e| format!("parse generated workflow: {e}"))?;
+    let workflows = doc
+        .as_mapping_mut()
+        .and_then(|m| m.get_mut(Yaml::String("workflows".into())))
+        .and_then(|w| w.as_sequence_mut())
+        .ok_or_else(|| "no workflows in generated overlay".to_string())?;
+
+    let wf = workflows
+        .iter_mut()
+        .find(|w| {
+            w.as_mapping()
+                .and_then(|m| m.get(Yaml::String("id".into())))
+                .and_then(|v| v.as_str())
+                == Some(wid.as_str())
+        })
+        .ok_or_else(|| format!("workflow '{wid}' is not project-created (not editable)"))?;
+
+    let phases = wf
+        .as_mapping_mut()
+        .and_then(|m| m.get_mut(Yaml::String("phases".into())))
+        .and_then(|p| p.as_sequence_mut())
+        .ok_or_else(|| "workflow has no phases".to_string())?;
+
+    let by_phase: std::collections::HashMap<&str, &PhaseRouting> =
+        phases_routing.iter().map(|t| (t.phase.as_str(), t)).collect();
+
+    for entry in phases.iter_mut() {
+        let pid = match entry {
+            Yaml::String(s) => Some(s.clone()),
+            Yaml::Mapping(m) => m
+                .iter()
+                .next()
+                .and_then(|(k, _)| k.as_str())
+                .filter(|k| *k != "workflow_ref" && *k != "id")
+                .map(String::from),
+            _ => None,
+        };
+        let Some(pid) = pid else { continue };
+        let Some(spec) = by_phase.get(pid.as_str()) else {
+            continue;
+        };
+
+        // Keep only routes that actually point somewhere.
+        let routes: Vec<&RouteSpec> = spec
+            .routes
+            .iter()
+            .filter(|r| {
+                !r.verdict.trim().is_empty()
+                    && (r
+                        .target
+                        .as_deref()
+                        .map(str::trim)
+                        .is_some_and(|t| !t.is_empty())
+                        || r.action
+                            .as_deref()
+                            .map(str::trim)
+                            .is_some_and(|a| !a.is_empty()))
+            })
+            .collect();
+
+        if routes.is_empty() {
+            // No routing → revert to a bare phase id.
+            *entry = Yaml::String(pid);
+            continue;
+        }
+
+        let mut on_verdict = Mapping::new();
+        let mut has_rework = false;
+        for r in &routes {
+            let mut route = Mapping::new();
+            match r.target.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+                Some(target) => {
+                    route.insert(Yaml::from("target"), Yaml::from(target));
+                }
+                None => {
+                    if let Some(action) =
+                        r.action.as_deref().map(str::trim).filter(|a| !a.is_empty())
+                    {
+                        route.insert(Yaml::from("action"), Yaml::from(action));
+                    }
+                }
+            }
+            let verdict = r.verdict.trim();
+            if verdict == "rework" {
+                has_rework = true;
+            }
+            on_verdict.insert(Yaml::from(verdict), Yaml::Mapping(route));
+        }
+
+        let mut body = Mapping::new();
+        if has_rework {
+            if let Some(max) = spec.max_attempts {
+                body.insert(Yaml::from("max_rework_attempts"), Yaml::from(max));
+            }
+        }
+        body.insert(Yaml::from("on_verdict"), Yaml::Mapping(on_verdict));
+        let mut wrap = Mapping::new();
+        wrap.insert(Yaml::from(pid), Yaml::Mapping(body));
+        *entry = Yaml::Mapping(wrap);
+    }
+
+    let body = serde_yaml::to_string(&doc).map_err(|e| e.to_string())?;
+    let tmp = file.with_extension("yaml.tmp");
+    std::fs::write(&tmp, body.as_bytes()).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &file).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Resume a paused (or crash-recovered) workflow run, respawning its runner.
 #[tauri::command]
 pub async fn animus_workflow_resume(
