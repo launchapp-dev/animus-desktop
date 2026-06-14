@@ -21,6 +21,7 @@ import {
 } from "../../api/workflow_yaml";
 import { animusWorkflowRun } from "../../api/animus";
 import { useProjectAgentLiveStates } from "../../state/projectEvents";
+import { useActiveProject } from "../../state/activeProject";
 import type { AgentState } from "../../components/AgentFace";
 import type { Project } from "../../types/contracts";
 
@@ -269,7 +270,13 @@ export function VisualizeView({ project }: { project: Project }) {
   const [loading, setLoading] = useState(false);
   const [running, setRunning] = useState<string | null>(null);
   const [runMsg, setRunMsg] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
   const agentStates = useProjectAgentLiveStates(project.id);
+  const setMode = useActiveProject((s) => s.setMode);
+  const liveOf = (agent: string): string | null => {
+    const s = agentStates[agent];
+    return s && s !== "idle" ? s : null;
+  };
 
   const runWorkflow = (id: string) => {
     const path = project.repo_path?.trim();
@@ -311,6 +318,8 @@ export function VisualizeView({ project }: { project: Project }) {
     return buildGraph(report, agentStates, running, runWorkflow);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report, agentStates, running]);
+
+  const selectedPhase = report?.phases.find((p) => p.id === selected) ?? null;
 
   if (loading && !report) {
     return (
@@ -379,12 +388,67 @@ export function VisualizeView({ project }: { project: Project }) {
           nodes={nodes}
           edges={edges}
           nodeTypes={NODE_TYPES}
+          onNodeClick={(_, node) => {
+            if (node.type === "phase") {
+              const d = node.data as PhaseNodeData;
+              setSelected(typeof d.label === "string" ? d.label : null);
+            }
+          }}
           fitView
           proOptions={{ hideAttribution: true }}
         >
           <Background gap={24} color="var(--bg-tint-5)" />
           <Controls position="bottom-right" />
         </ReactFlow>
+        {selectedPhase && (
+          <aside className="wf-cfg">
+            <header className="wf-cfg__head">
+              <span className="wf-cfg__title">{selectedPhase.id}</span>
+              <button
+                type="button"
+                className="wf-cfg__x"
+                onClick={() => setSelected(null)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </header>
+            <div className="wf-cfg__body">
+              <div className="rt-row">
+                <span className="rt-row__role">mode</span>
+                <span className="rt-row__name">{selectedPhase.mode ?? "—"}</span>
+              </div>
+              {selectedPhase.agent && (
+                <div className="rt-row">
+                  <span className="rt-row__role">agent</span>
+                  <span className="rt-row__name">@{selectedPhase.agent}</span>
+                  {liveOf(selectedPhase.agent) && (
+                    <span className="rf-phase-node__live">{liveOf(selectedPhase.agent)}</span>
+                  )}
+                </div>
+              )}
+              {selectedPhase.directive && (
+                <div className="sk-detail__section">
+                  <div className="sk-detail__label">Directive</div>
+                  <pre className="sk-detail__prompt">{selectedPhase.directive}</pre>
+                </div>
+              )}
+              <button
+                type="button"
+                className="plugins-pane__ghost"
+                onClick={() => setMode("journal")}
+              >
+                Open run in Journal →
+              </button>
+              {(selectedPhase.decisionVerdicts?.length ?? 0) > 0 && (
+                <p className="aj-muted" style={{ fontSize: 11 }}>
+                  This phase has a decision gate — approve/reject a paused run from
+                  the Journal tab.
+                </p>
+              )}
+            </div>
+          </aside>
+        )}
       </div>
     </div>
   );
