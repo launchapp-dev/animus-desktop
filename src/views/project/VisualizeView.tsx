@@ -191,6 +191,8 @@ function buildGraph(
     });
 
     let prev = wfNodeId;
+    const phaseNodeByValue = new Map<string, string>();
+    const reworkSpecs: { from: string; target: string; max: number | null }[] = [];
     wf.phases.forEach((p, pIdx) => {
       const key = p.value;
       const ps = phaseById.get(key);
@@ -215,8 +217,34 @@ function buildGraph(
         markerEnd: { type: MarkerType.ArrowClosed },
         style: { stroke: "var(--border-strong)", strokeWidth: 1.25 },
       });
+      phaseNodeByValue.set(key, phaseNodeId);
+      if (p.reworkTarget) {
+        reworkSpecs.push({
+          from: phaseNodeId,
+          target: p.reworkTarget,
+          max: p.maxReworkAttempts,
+        });
+      }
       prev = phaseNodeId;
     });
+
+    // Rework loop-back edges to the real on_verdict.rework.target.
+    for (const spec of reworkSpecs) {
+      const targetNode = phaseNodeByValue.get(spec.target);
+      if (!targetNode) continue;
+      edges.push({
+        id: `rework:${spec.from}->${targetNode}`,
+        source: spec.from,
+        target: targetNode,
+        type: "default",
+        animated: true,
+        label: spec.max ? `rework ×${spec.max}` : "rework",
+        style: { stroke: "var(--yellow)", strokeDasharray: "5 4", strokeWidth: 1.25 },
+        labelStyle: { fill: "var(--yellow)", fontSize: 10 },
+        labelBgStyle: { fill: "var(--bg-elevated)", fillOpacity: 0.9 },
+        markerEnd: { type: MarkerType.ArrowClosed, color: "var(--yellow)" },
+      });
+    }
   });
 
   // Triggers + schedules → workflow edges (left-of-workflow column).
