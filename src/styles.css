@@ -2500,32 +2500,41 @@ a {
 
 .rf-phase-node {
   position: relative;
-  background: var(--bg-elevated);
-  border: var(--hairline) solid var(--border-strong);
-  border-radius: var(--radius);
-  padding: 8px 10px;
-  min-width: 160px;
-  max-width: 200px;
+  background: var(--surface-1);
+  border: var(--hairline) solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  min-width: 168px;
+  max-width: 212px;
   color: var(--text);
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
+  transition: border-color var(--motion-fast) var(--ease-out),
+    background var(--motion-fast) var(--ease-out),
+    box-shadow var(--motion-fast) var(--ease-out);
 }
+/* Depth via surface lift on hover, not shadow. */
+.react-flow__node:hover .rf-phase-node { background: var(--surface-2); border-color: var(--border-strong); }
 
 .rf-phase-node__head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
+  gap: 7px;
+  margin-bottom: 5px;
 }
 
 .rf-phase-node__dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .rf-phase-node__title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
+  letter-spacing: -0.1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .rf-phase-node__meta {
@@ -7815,6 +7824,43 @@ textarea.wf-input { font-family: var(--font-mono); font-size: 11.5px; resize: ve
   padding: 0 24px;
   font-size: 12px;
   color: var(--text-faint);
+  background-image: radial-gradient(var(--border) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+.wf-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 320px; }
+.wf-empty__mark {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  color: var(--copper);
+  background: var(--copper-bg-soft);
+  border: var(--hairline) solid var(--copper);
+  margin-bottom: 2px;
+}
+.wf-empty__title { font-size: 15px; font-weight: 600; color: var(--text); letter-spacing: -0.1px; }
+.wf-empty__sub { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text-faint); }
+.wf-empty__cta {
+  margin-top: 6px;
+  padding: 7px 18px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.wf-empty__cta:hover { background: var(--accent-hover); }
+.wf-empty__hint { font-size: 10.5px; color: var(--text-faint); font-family: var(--font-mono); }
+.wf-empty__hint kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 0 4px;
+  border: var(--hairline) solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-1);
 }
 /* Hover-reveal node toolbar (builder phase nodes) */
 .rf-node-toolbar {
@@ -7839,7 +7885,7 @@ textarea.wf-input { font-family: var(--font-mono); font-size: 11.5px; resize: ve
 }
 .rf-node-toolbar button:hover { background: var(--bg-hover); color: var(--text); }
 .rf-node-toolbar button.rf-node-toolbar__danger:hover { color: var(--crimson); }
-.rf-phase-node--selected { border-color: var(--copper) !important; box-shadow: 0 0 0 1px var(--copper); }
+.rf-phase-node--selected { border-color: var(--copper) !important; box-shadow: 0 0 0 3px var(--copper-bg-soft); }
 /* "+" insert button on a builder edge — reveals on edge hover */
 .wf-edge-plus {
   position: absolute;

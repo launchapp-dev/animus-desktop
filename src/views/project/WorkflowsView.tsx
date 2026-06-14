@@ -427,8 +427,42 @@ function WorkflowCanvas({
 
   if (phases.length === 0) {
     return (
-      <div className="wf-canvas wf-canvas--empty">
-        Add phases below — they appear here as a drag-to-reorder sequence.
+      <div className="wf-canvas wf-canvas--empty" ref={wrapRef}>
+        <div className="wf-empty">
+          <div className="wf-empty__mark" aria-hidden>
+            <GitBranch size={22} />
+          </div>
+          <div className="wf-empty__title">Compose a workflow</div>
+          <p className="wf-empty__sub">
+            Add phases in order — they appear here as a chain you can drag,
+            branch, and route.
+          </p>
+          <button
+            type="button"
+            className="wf-empty__cta"
+            onClick={() => onNewPhaseAt(0)}
+          >
+            Add first phase
+          </button>
+          <span className="wf-empty__hint">
+            or pick a template from the palette · <kbd>⌘K</kbd> to add
+          </span>
+        </div>
+        {chooser && (
+          <PhasePicker
+            unused={unused}
+            position={chooser}
+            onPick={(p) => {
+              onInsert(chooser.index, p);
+              setChooser(null);
+            }}
+            onNew={() => {
+              onNewPhaseAt(chooser.index);
+              setChooser(null);
+            }}
+            onClose={() => setChooser(null)}
+          />
+        )}
       </div>
     );
   }

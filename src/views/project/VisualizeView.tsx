@@ -333,7 +333,7 @@ function buildGraph(
         },
         style: {
           stroke: isActive ? "var(--copper)" : "var(--border-strong)",
-          strokeWidth: isActive ? 1.75 : 1.25,
+          strokeWidth: isActive ? 2 : 1.5,
         },
       };
       edges.push(taken ? spine : dimEdge(spine));
