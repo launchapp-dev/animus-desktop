@@ -261,11 +261,12 @@ export function ProjectsRail({
   const { toggleSidebar } = useSidebar();
   const wispExpression = useWispState();
   const wispTooltip = {
-    awake: "Animus · daemon running — idle and ready",
-    working: "Animus · a cycle is running",
-    done: "Animus · cycle passed",
-    resting: "Animus · daemon stopped",
-    "needs-you": "Animus · needs you — daemon not installed, or a cycle is blocked or failed",
+    awake: "Animus is awake — the daemon is running and idle, ready for work.",
+    working: "Animus is working — a cycle is running right now.",
+    done: "Animus is pleased — the last cycle just passed.",
+    resting: "Animus is resting — no active daemons.",
+    "needs-you":
+      "Animus needs you — the daemon isn't installed, or a cycle is blocked or failed.",
   }[wispExpression];
 
   const [conversations, setConversations] = useState<ProjectConversation[]>([]);
