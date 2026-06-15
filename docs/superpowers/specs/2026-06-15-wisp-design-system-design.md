@@ -46,8 +46,13 @@ Tailwind + CSS-variable tokens).
 - **Menu-bar item:** drop the "Animus" word; swap the tray icon per expression.
   Reactive. macOS template images so the OS handles light/dark menu bars.
 - **Both surfaces are reactive** (not static — this reversed an earlier call).
-- **Tray "working" signal:** emit a new `cycle-started` event to the tray so the
-  menu-bar reaches full five-state parity with the sidebar.
+- **Tray drive mechanism (implemented):** rather than emit a new Rust
+  `cycle-started` event, the tray is driven from the **frontend** — `useWispTray`
+  pushes the single canonical expression (from `wispExpressionFromDaemon`,
+  including `working`) to a `set_wisp_expression` Tauri command. This keeps one
+  mapping (DRY), reaches full five-state parity, and works while the window is
+  hidden (the webview keeps running). The earlier "new `cycle-started` event"
+  idea was superseded by this; no such event was added.
 
 ## Expression → daemon-state mapping
 
@@ -176,10 +181,12 @@ right is unchanged.
 
 - A new pseudo-view selected via `activeProjectId === "wisp"` (mirroring the
   `plugins` / `all-agents` special ids in `Bridge.tsx`), reachable from the
-  command palette and/or a sidebar entry.
-- Reproduces the spec's nine sections (the mark, construction, color,
-  expressions, motion library w/ flat fallbacks, flat set, sizing, lockups,
-  misuse) using the real `<Wisp>` component, in both theme contexts.
+  command palette.
+- Reproduces the key sections of the spec that exercise the live component — the
+  mark, the expression system, the motion library (with reduced-motion
+  fallback), sizing, and a lockup — using the real `<Wisp>` component. The
+  reference-only sections (construction grid, color swatches, flat-export set,
+  misuse) are documented in the source design file rather than re-rendered.
 
 ### 7. Tests — `src/components/Wisp.test.tsx`, `src/lib/wispExpression.test.ts`
 
