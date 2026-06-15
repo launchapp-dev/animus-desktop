@@ -21,7 +21,11 @@ interface WispProps {
   expression?: WispExpression;
   size?: number;
   motion?: WispMotion;
-  /** Force the mono-knockout flame (tray / favicons / tiny sizes). */
+  /**
+   * Force the mono-knockout flame (tray / favicons / tiny sizes). Note: this
+   * uses the simple small geometry with circle eyes, so expression accents
+   * (e.g. the needs-you alert mark) are dropped at this size.
+   */
   mono?: boolean;
   /** Accessible label. When omitted the mark is aria-hidden. */
   title?: string;
@@ -155,7 +159,7 @@ export function Wisp({
 
   return (
     <svg
-      className={`wisp-svg ${rootMotion} ${className ?? ""}`.trim()}
+      className={["wisp-svg", rootMotion, className].filter(Boolean).join(" ")}
       width={size}
       height={size}
       viewBox="0 0 64 64"

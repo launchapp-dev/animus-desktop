@@ -15,15 +15,17 @@ describe("Wisp", () => {
   });
 
   it("knockout eyes use the surface variable, never a painted hex", () => {
-    const { container } = render(<Wisp expression="awake" />);
-    const eyes = container.querySelectorAll(".wisp__eye");
-    expect(eyes.length).toBeGreaterThan(0);
-    eyes.forEach((e) => {
-      const fill = e.getAttribute("fill");
-      const stroke = e.getAttribute("stroke");
-      const paint = fill && fill !== "none" ? fill : stroke;
-      expect(paint).toBe("var(--wisp-eye)");
-    });
+    for (const expression of ["awake", "done"] as const) {
+      const { container } = render(<Wisp expression={expression} />);
+      const eyes = container.querySelectorAll(".wisp__eye");
+      expect(eyes.length).toBeGreaterThan(0);
+      eyes.forEach((e) => {
+        const fill = e.getAttribute("fill");
+        const stroke = e.getAttribute("stroke");
+        const paint = fill && fill !== "none" ? fill : stroke;
+        expect(paint).toBe("var(--wisp-eye)");
+      });
+    }
   });
 
   it("needs-you shows the amber exclamation", () => {
