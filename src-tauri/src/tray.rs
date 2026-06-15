@@ -206,7 +206,9 @@ fn rebuild(
     let menu = build_menu(handle, status, builds)?;
     if let Some(tray) = handle.tray_by_id(TRAY_ID) {
         tray.set_menu(Some(menu))?;
-        tray.set_title(Some(status.title()))?;
+        // Icon (set via set_wisp_expression) carries state now — keep the menu
+        // bar icon-only so the "Animus" word doesn't reappear on status events.
+        tray.set_title(None::<&str>)?;
     }
     Ok(())
 }
