@@ -9,9 +9,6 @@ use tauri::{
 
 const TRAY_ID: &str = "animus-desktop-tray";
 const POPUP_LABEL: &str = "popup";
-const TITLE_RUNNING: &str = "● Animus";
-const TITLE_DOWN: &str = "✕ Animus";
-const TITLE_MISSING: &str = "○ Animus";
 
 const MENU_ID_HEADER: &str = "header";
 const MENU_ID_STATUS: &str = "status";
@@ -33,14 +30,6 @@ pub enum DaemonStatus {
 }
 
 impl DaemonStatus {
-    fn title(self) -> &'static str {
-        match self {
-            DaemonStatus::Running => TITLE_RUNNING,
-            DaemonStatus::Down => TITLE_DOWN,
-            DaemonStatus::Missing => TITLE_MISSING,
-        }
-    }
-
     fn label(self) -> &'static str {
         match self {
             DaemonStatus::Running => "Status: running",
@@ -61,12 +50,17 @@ pub enum WispExpression {
 }
 
 impl WispExpression {
+    /// The five in-app expressions collapse onto three boldly-distinct tray
+    /// icons — subtle eye shapes don't read at menu-bar size.
     fn icon_bytes(self) -> &'static [u8] {
         match self {
-            WispExpression::Awake => include_bytes!("../icons/wisp/awake@2x.png"),
-            WispExpression::Working => include_bytes!("../icons/wisp/working@2x.png"),
-            WispExpression::Done => include_bytes!("../icons/wisp/done@2x.png"),
+            // running / a cycle running / just passed → open round eyes
+            WispExpression::Awake | WispExpression::Working | WispExpression::Done => {
+                include_bytes!("../icons/wisp/active@2x.png")
+            }
+            // daemon stopped → closed eyes
             WispExpression::Resting => include_bytes!("../icons/wisp/resting@2x.png"),
+            // not installed / blocked / failed → eyes + exclamation
             WispExpression::NeedsYou => include_bytes!("../icons/wisp/needs-you@2x.png"),
         }
     }
@@ -111,22 +105,20 @@ pub fn setup(app: &mut tauri::App) -> tauri::Result<()> {
 
     let menu = build_menu(app.handle(), DaemonStatus::Down, &[])?;
 
-    let _tray = TrayIconBuilder::with_id(TRAY_ID)
-        .title(DaemonStatus::Down.title())
+    // Set the Wisp flame icon ON THE BUILDER. Setting it after build() returns
+    // Ok but does NOT visually replace the default app icon on macOS (the green
+    // bundle icon stays), so the initial icon must be set here. No .title(): the
+    // icon (which swaps per daemon state) carries everything.
+    let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
         // Left-click pops up our window; right-click shows the native menu.
         .show_menu_on_left_click(false)
         .on_menu_event(handle_menu_event)
-        .on_tray_icon_event(handle_tray_event)
-        .build(app)?;
-
-    if let Some(tray) = app.handle().tray_by_id(TRAY_ID) {
-        if let Ok(image) = tauri::image::Image::from_bytes(WispExpression::Resting.icon_bytes()) {
-            let _ = tray.set_icon(Some(image));
-            let _ = tray.set_icon_as_template(true);
-            let _ = tray.set_title(None::<&str>);
-        }
+        .on_tray_icon_event(handle_tray_event);
+    if let Ok(image) = tauri::image::Image::from_bytes(WispExpression::Resting.icon_bytes()) {
+        builder = builder.icon(image).icon_as_template(true);
     }
+    let _tray = builder.build(app)?;
 
     // Hide popup on boot (workaround for visible:false config quirk in dev)
     // and on blur (standard menubar UX).
@@ -172,7 +164,6 @@ pub fn set_wisp_expression(handle: AppHandle, expression: WispExpression) -> Res
         .map_err(|e| e.to_string())?;
     tray.set_icon(Some(image)).map_err(|e| e.to_string())?;
     tray.set_icon_as_template(true).map_err(|e| e.to_string())?;
-    tray.set_title(None::<&str>).map_err(|e| e.to_string())?;
     Ok(())
 }
 
