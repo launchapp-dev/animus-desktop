@@ -92,6 +92,7 @@ pub fn run() {
             daemon::daemon_start,
             daemon::daemon_stop,
             daemon::daemon_restart,
+            tray::set_wisp_expression,
             plugin::plugin_list,
             plugin::plugin_install,
             plugin::plugin_install_defaults,

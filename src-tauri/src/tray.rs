@@ -50,6 +50,28 @@ impl DaemonStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WispExpression {
+    Awake,
+    Working,
+    Done,
+    Resting,
+    NeedsYou,
+}
+
+impl WispExpression {
+    fn icon_bytes(self) -> &'static [u8] {
+        match self {
+            WispExpression::Awake => include_bytes!("../icons/wisp/awake@2x.png"),
+            WispExpression::Working => include_bytes!("../icons/wisp/working@2x.png"),
+            WispExpression::Done => include_bytes!("../icons/wisp/done@2x.png"),
+            WispExpression::Resting => include_bytes!("../icons/wisp/resting@2x.png"),
+            WispExpression::NeedsYou => include_bytes!("../icons/wisp/needs-you@2x.png"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrayBuildEntry {
     pub cycle_id: String,
@@ -98,6 +120,14 @@ pub fn setup(app: &mut tauri::App) -> tauri::Result<()> {
         .on_tray_icon_event(handle_tray_event)
         .build(app)?;
 
+    if let Some(tray) = app.handle().tray_by_id(TRAY_ID) {
+        if let Ok(image) = tauri::image::Image::from_bytes(WispExpression::Resting.icon_bytes()) {
+            let _ = tray.set_icon(Some(image));
+            let _ = tray.set_icon_as_template(true);
+            let _ = tray.set_title(None::<&str>);
+        }
+    }
+
     // Hide popup on boot (workaround for visible:false config quirk in dev)
     // and on blur (standard menubar UX).
     if let Some(popup) = app.get_webview_window(POPUP_LABEL) {
@@ -130,6 +160,19 @@ pub fn setup(app: &mut tauri::App) -> tauri::Result<()> {
         }
     });
 
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_wisp_expression(handle: AppHandle, expression: WispExpression) -> Result<(), String> {
+    let tray = handle
+        .tray_by_id(TRAY_ID)
+        .ok_or_else(|| "tray not found".to_string())?;
+    let image = tauri::image::Image::from_bytes(expression.icon_bytes())
+        .map_err(|e| e.to_string())?;
+    tray.set_icon(Some(image)).map_err(|e| e.to_string())?;
+    tray.set_icon_as_template(true).map_err(|e| e.to_string())?;
+    tray.set_title(None::<&str>).map_err(|e| e.to_string())?;
     Ok(())
 }
 
