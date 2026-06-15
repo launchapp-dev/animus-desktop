@@ -49,6 +49,7 @@ import {
 import { useProjectAgentLiveStates } from "../../state/projectEvents";
 import { useActiveProject } from "../../state/activeProject";
 import type { AgentState } from "../../components/AgentFace";
+import { Markdown } from "../../components/Markdown";
 import type { Project } from "../../types/contracts";
 
 const LIVE_COLOR: Record<string, string> = {
@@ -1030,6 +1031,7 @@ export function VisualizeView({ project }: { project: Project }) {
 
   // Persisted output this phase produced (the data downstream phases read).
   const [phaseOut, setPhaseOut] = useState<string | null>(null);
+  const [outRaw, setOutRaw] = useState(false);
   useEffect(() => {
     const path = project.repo_path?.trim();
     if (!path || !selectedWfId || !selectedPhase) {
@@ -1281,8 +1283,32 @@ export function VisualizeView({ project }: { project: Project }) {
               )}
               {phaseOut && (
                 <div className="sk-detail__section">
-                  <div className="sk-detail__label">Persisted output</div>
-                  <pre className="wf-source wf-source--output">{phaseOut}</pre>
+                  <div className="rf-out__head">
+                    <span className="sk-detail__label">Persisted output</span>
+                    <div className="wf-seg wf-seg--sm rf-out__toggle">
+                      <button
+                        type="button"
+                        className={!outRaw ? "wf-seg__on" : ""}
+                        onClick={() => setOutRaw(false)}
+                      >
+                        Rendered
+                      </button>
+                      <button
+                        type="button"
+                        className={outRaw ? "wf-seg__on" : ""}
+                        onClick={() => setOutRaw(true)}
+                      >
+                        Raw
+                      </button>
+                    </div>
+                  </div>
+                  {outRaw ? (
+                    <pre className="wf-source wf-source--output">{phaseOut}</pre>
+                  ) : (
+                    <div className="rf-out__md">
+                      <Markdown>{phaseOut}</Markdown>
+                    </div>
+                  )}
                 </div>
               )}
               {overlay &&

@@ -2676,6 +2676,19 @@ a {
 .rf-returns__key { flex: 0 0 38%; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); word-break: break-word; }
 .rf-returns__val { flex: 1; font-size: 11px; color: var(--text); word-break: break-word; }
 .wf-source--output { max-height: 260px; white-space: pre-wrap; word-break: break-word; }
+.rf-out__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.rf-out__toggle { flex-shrink: 0; }
+.rf-out__md {
+  max-height: 300px;
+  overflow: auto;
+  padding: 8px 10px;
+  background: var(--surface-1);
+  border: var(--hairline) solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.rf-out__md > :first-child { margin-top: 0; }
+.rf-out__md > :last-child { margin-bottom: 0; }
 .rf-runpick { display: inline-flex; align-items: center; gap: 6px; }
 .rf-runpick__label {
   font-family: var(--font-mono);
