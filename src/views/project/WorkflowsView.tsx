@@ -1341,62 +1341,60 @@ function PhaseComposer({
 }
 
 /** Compose a workflow from ordered phases (existing or freshly authored). */
-interface DraftPhase {
-  id: string;
-  mode: string;
-  agent?: string;
-  directive?: string;
-}
-interface DraftPlan {
-  name?: string;
-  description?: string;
-  phases: DraftPhase[];
+// --- Builder copilot: the model edits the live workflow via structured ops ---
+
+type CopilotOp =
+  | { op: "set_meta"; name?: string; description?: string }
+  | {
+      op: "add_phase";
+      id: string;
+      mode?: string;
+      agent?: string;
+      directive?: string;
+      after?: string | null;
+    }
+  | { op: "update_phase"; id: string; mode?: string; agent?: string; directive?: string }
+  | { op: "remove_phase"; id: string }
+  | { op: "set_route"; phase: string; verdict: string; target: string }
+  | { op: "reorder"; order: string[] };
+
+interface CopilotReply {
+  reply: string;
+  ops: CopilotOp[];
 }
 
-/** Parse a model reply into a workflow plan — tolerant of ```json fences and
- *  surrounding prose; pulls the first balanced JSON object. */
-function parsePlan(text: string): DraftPlan | { error: string } {
+/** Normalize a model-supplied mode onto Animus's agent/command/manual set. */
+function normalizeMode(m: unknown): string {
+  const s = String(m ?? "agent");
+  if (s === "command") return "command";
+  if (s === "manual" || s === "approval" || s === "gate") return "manual";
+  return "agent";
+}
+
+/** Parse a copilot reply (`{reply, ops}`) — tolerant of fences/prose. */
+function parseCopilot(text: string): CopilotReply | { error: string } {
   const m = text.match(/\{[\s\S]*\}/);
-  if (!m) return { error: "The model didn't return a JSON plan." };
+  if (!m) return { error: "The model didn't return a JSON op set." };
   try {
     const o = JSON.parse(m[0]) as Record<string, unknown>;
-    const raw = Array.isArray(o.phases) ? o.phases : [];
-    const phases: DraftPhase[] = raw
-      .filter((p): p is Record<string, unknown> => !!p && typeof p === "object")
-      .map((p) => {
-        const m = String(p.mode ?? "agent");
-        const mode =
-          m === "command"
-            ? "command"
-            : m === "manual" || m === "approval" || m === "gate"
-              ? "manual"
-              : "agent";
-        return {
-          id: String(p.id ?? "").trim(),
-          mode,
-          agent: typeof p.agent === "string" ? p.agent : undefined,
-          directive: typeof p.directive === "string" ? p.directive : undefined,
-        };
-      })
-      .filter((p) => SLUG_RE.test(p.id));
-    if (phases.length === 0) return { error: "No valid phases in the plan." };
-    return {
-      name: typeof o.name === "string" ? o.name : undefined,
-      description: typeof o.description === "string" ? o.description : undefined,
-      phases,
-    };
+    const ops = Array.isArray(o.ops)
+      ? (o.ops as unknown[]).filter(
+          (x): x is CopilotOp =>
+            !!x && typeof x === "object" && typeof (x as { op?: unknown }).op === "string",
+        )
+      : [];
+    const reply = typeof o.reply === "string" ? o.reply : "Done.";
+    return { reply, ops };
   } catch {
-    return { error: "Couldn't parse the plan JSON." };
+    return { error: "Couldn't parse the model's reply." };
   }
 }
 
-/** One-shot: ask an installed provider for a workflow plan and parse it. Runs
- *  the provider via the chat pipeline and collects its final text. */
-async function describeWorkflow(
+/** Run an installed provider for a single prompt; resolve its final text. */
+async function providerOneShot(
   repoPath: string,
-  request: string,
-  existingPhases: string[],
-): Promise<DraftPlan | { error: string }> {
+  prompt: string,
+): Promise<{ text: string } | { error: string }> {
   let providers: ProviderOption[];
   try {
     providers = await chatProviders();
@@ -1407,22 +1405,10 @@ async function describeWorkflow(
   if (!provider) {
     return { error: "No provider CLI installed — add one in Settings first." };
   }
-  const sessionId = `wf-describe-${Date.now()}-${Math.floor(performance.now())}`;
-  const reusable = existingPhases.slice(0, 40).join(", ") || "(none yet)";
-  const prompt = [
-    "You are designing an Animus agent workflow. Reply with ONLY a JSON object",
-    "(no prose, no markdown fences) of this exact shape:",
-    '{"name":"Display Name","description":"one line","phases":[{"id":"kebab-id","mode":"agent","agent":"default","directive":"what this phase does"}]}',
-    "Rules: 3-7 phases; ids lowercase kebab-case; each agent phase needs a concise directive;",
-    "use mode \"command\" only for shell steps. Prefer reusing these existing phase ids when they fit:",
-    reusable,
-    "",
-    `Request: ${request}`,
-  ].join("\n");
-
+  const sessionId = `wf-copilot-${Date.now()}-${Math.floor(performance.now())}`;
   let blocks: TurnBlock[] = [];
   const unlistens: Array<() => void> = [];
-  const done = new Promise<DraftPlan | { error: string }>((resolve) => {
+  const done = new Promise<{ text: string } | { error: string }>((resolve) => {
     const timer = window.setTimeout(() => {
       cleanup();
       resolve({ error: "Timed out waiting for the model." });
@@ -1443,7 +1429,7 @@ async function describeWorkflow(
       if (ev.payload.sessionId !== sessionId) return;
       cleanup();
       const text = blocksToPlainText(blocks);
-      resolve(text ? parsePlan(text) : { error: ev.payload.error ?? "Empty reply." });
+      resolve(text ? { text } : { error: ev.payload.error ?? "Empty reply." });
     }).then((u) => unlistens.push(u));
   });
 
@@ -1528,78 +1514,170 @@ function WorkflowComposer({
     return m;
   }, [lint]);
   const [paletteOpen, setPaletteOpen] = useState(true);
+  const [leftTab, setLeftTab] = useState<"library" | "copilot">("library");
   const [showReview, setShowReview] = useState(false);
   const lintWarnings = lint.filter((l) => l.level === "warn");
 
-  // AI "Describe it" → draft a phase chain onto the canvas.
-  const [aiPrompt, setAiPrompt] = useState("");
-  const [aiBusy, setAiBusy] = useState(false);
-  const [aiError, setAiError] = useState<string | null>(null);
-  const runDescribe = async () => {
-    const req = aiPrompt.trim();
-    if (!req) return;
-    setAiBusy(true);
-    setAiError(null);
+  // Copilot chat: the model edits the live workflow conversationally via ops.
+  const [chat, setChat] = useState<{ role: "user" | "assistant"; text: string }[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    chatScrollRef.current?.scrollTo({ top: 1e9 });
+  }, [chat]);
+
+  const fallbackAgent = agents[0]?.id ?? "default";
+  const materializePhase = async (
+    pid: string,
+    mode: string,
+    agent: string | undefined,
+    directive: string | undefined,
+  ) => {
+    const agentOk = agent && agents.some((a) => a.id === agent);
+    const runtime: Record<string, unknown> =
+      mode === "command"
+        ? {
+            mode: "command",
+            agent_id: null,
+            directive: directive ?? null,
+            command: { program: "", args: [] },
+            decision_contract: null,
+          }
+        : mode === "manual"
+          ? {
+              mode: "manual",
+              agent_id: null,
+              directive: directive ?? null,
+              command: null,
+              decision_contract: null,
+            }
+          : {
+              mode: "agent",
+              agent_id: agentOk ? agent : fallbackAgent,
+              directive: directive ?? null,
+              command: null,
+              decision_contract: null,
+            };
     try {
-      const plan = await describeWorkflow(repoPath, req, pickable);
-      if ("error" in plan) {
-        setAiError(plan.error);
-        return;
-      }
-      const fallbackAgent = agents[0]?.id ?? "default";
-      // Materialize new phase ids as draft defs (reuse existing ids as-is).
-      for (const ph of plan.phases) {
-        if (pickable.includes(ph.id)) continue;
-        const agentOk = ph.agent && agents.some((a) => a.id === ph.agent);
-        const runtime: Record<string, unknown> =
-          ph.mode === "command"
-            ? {
-                mode: "command",
-                agent_id: null,
-                directive: ph.directive ?? null,
-                command: { program: "", args: [] },
-                decision_contract: null,
-              }
-            : ph.mode === "manual"
-              ? {
-                  mode: "manual",
-                  agent_id: null,
-                  directive: ph.directive ?? null,
-                  command: null,
-                  decision_contract: null,
-                }
-              : {
-                  mode: "agent",
-                  agent_id: agentOk ? ph.agent : fallbackAgent,
-                  directive: ph.directive ?? null,
-                  command: null,
-                  decision_contract: null,
-                };
-        try {
-          await animusWorkflowPhaseUpsert(repoPath, ph.id, runtime);
-        } catch {
-          /* skip a phase that fails to materialize */
-        }
-      }
-      if (plan.name && !name.trim()) setName(plan.name);
-      if (plan.description && !description.trim()) setDescription(plan.description);
-      if (plan.name && !id.trim()) {
-        setId(
-          plan.name
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, "-")
-            .replace(/^-+|-+$/g, "")
-            .slice(0, 40),
-        );
-      }
-      setPhases(plan.phases.map((p) => p.id));
-      setAiPrompt("");
-      onRefresh();
-    } catch (e) {
-      setAiError(String(e));
-    } finally {
-      setAiBusy(false);
+      await animusWorkflowPhaseUpsert(repoPath, pid, runtime);
+    } catch {
+      /* skip a phase that fails to materialize */
     }
+  };
+
+  const applyOps = async (ops: CopilotOp[]) => {
+    let phasesNext = [...phases];
+    const routeChanges: { phase: string; verdict: string; target: string }[] = [];
+    let touchedDefs = false;
+    for (const op of ops) {
+      if (op.op === "set_meta") {
+        if (typeof op.name === "string") setName(op.name);
+        if (typeof op.description === "string") setDescription(op.description);
+      } else if (op.op === "add_phase") {
+        const pid = String(op.id ?? "").trim();
+        if (!SLUG_RE.test(pid)) continue;
+        if (!pickable.includes(pid)) {
+          await materializePhase(pid, normalizeMode(op.mode), op.agent, op.directive);
+          touchedDefs = true;
+        }
+        if (!phasesNext.includes(pid)) {
+          const at =
+            op.after && phasesNext.includes(op.after)
+              ? phasesNext.indexOf(op.after) + 1
+              : phasesNext.length;
+          phasesNext = [...phasesNext.slice(0, at), pid, ...phasesNext.slice(at)];
+        }
+      } else if (op.op === "update_phase") {
+        const pid = String(op.id ?? "").trim();
+        if (!pid) continue;
+        await materializePhase(
+          pid,
+          normalizeMode(op.mode ?? phaseInfo[pid]?.mode ?? "agent"),
+          op.agent ?? phaseInfo[pid]?.agent ?? undefined,
+          op.directive ?? phaseInfo[pid]?.directive ?? undefined,
+        );
+        touchedDefs = true;
+      } else if (op.op === "remove_phase") {
+        phasesNext = phasesNext.filter((p) => p !== op.id);
+      } else if (op.op === "set_route") {
+        routeChanges.push({ phase: op.phase, verdict: op.verdict, target: op.target });
+      } else if (op.op === "reorder" && Array.isArray(op.order)) {
+        const valid = op.order.filter((x) => phasesNext.includes(x));
+        const rest = phasesNext.filter((x) => !valid.includes(x));
+        phasesNext = [...valid, ...rest];
+      }
+    }
+    setPhases(phasesNext);
+    if (routeChanges.length) {
+      setRoutes((prev) => {
+        const next = { ...prev };
+        for (const c of routeChanges) {
+          const cur = { ...(next[c.phase] ?? {}) };
+          if (c.target) cur[c.verdict] = c.target;
+          else delete cur[c.verdict];
+          if (Object.keys(cur).length) next[c.phase] = cur;
+          else delete next[c.phase];
+        }
+        return next;
+      });
+    }
+    if (touchedDefs) onRefresh();
+  };
+
+  const sendCopilot = async () => {
+    const msg = chatInput.trim();
+    if (!msg || chatBusy) return;
+    setChat((c) => [...c, { role: "user", text: msg }]);
+    setChatInput("");
+    setChatBusy(true);
+    const stateBlock = JSON.stringify({
+      name: name.trim() || null,
+      phases: phases.map((p) => ({
+        id: p,
+        mode: phaseInfo[p]?.mode ?? "agent",
+        agent: phaseInfo[p]?.agent ?? null,
+        gate: !!phaseInfo[p]?.gate,
+        directive: phaseInfo[p]?.directive ?? null,
+      })),
+      routes,
+    });
+    const history = chat
+      .slice(-4)
+      .map((m) => `${m.role}: ${m.text}`)
+      .join("\n");
+    const prompt = [
+      "You are a copilot editing an Animus agent workflow in a visual builder.",
+      "Apply the user's request by returning ONLY JSON (no prose, no fences):",
+      '{"reply":"one short sentence of what you changed","ops":[...]}',
+      'Ops: set_meta{name?,description?}; add_phase{id,mode?(agent|command|manual),agent?,directive?,after?(existing phase id, or omit to append)}; update_phase{id,mode?,agent?,directive?}; remove_phase{id}; set_route{phase,verdict(approve|rework|reject),target(phase id, or "" to clear)}; reorder{order:[phase ids]}.',
+      'Rules: ids lowercase kebab-case; only reference phases that already exist or that you add in this reply; emit only the ops needed; never invent agents — use "default".',
+      `Existing reusable phase ids: ${pickable.slice(0, 40).join(", ") || "(none)"}.`,
+      `Available agents: ${agents.map((a) => a.id).slice(0, 20).join(", ") || "default"}.`,
+      `Current workflow: ${stateBlock}`,
+      history ? `Recent conversation:\n${history}` : "",
+      `User: ${msg}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const res = await providerOneShot(repoPath, prompt);
+    if ("error" in res) {
+      setChat((c) => [...c, { role: "assistant", text: `⚠ ${res.error}` }]);
+      setChatBusy(false);
+      return;
+    }
+    const parsed = parseCopilot(res.text);
+    if ("error" in parsed) {
+      setChat((c) => [...c, { role: "assistant", text: `⚠ ${parsed.error}` }]);
+      setChatBusy(false);
+      return;
+    }
+    await applyOps(parsed.ops);
+    setChat((c) => [
+      ...c,
+      { role: "assistant", text: parsed.reply || "Done." },
+    ]);
+    setChatBusy(false);
   };
 
   // Every {{dispatch_input}} variable referenced across the chosen phases,
@@ -1818,8 +1896,21 @@ function WorkflowComposer({
         )}
         {paletteOpen && (
         <aside className="wf-builder__palette">
-          <div className="wf-pal-head">
-            <span className="wf-compose__label" style={{ margin: 0 }}>Library</span>
+          <div className="wf-pal-tabs">
+            <button
+              type="button"
+              className={`wf-pal-tab ${leftTab === "library" ? "wf-pal-tab--on" : ""}`}
+              onClick={() => setLeftTab("library")}
+            >
+              Library
+            </button>
+            <button
+              type="button"
+              className={`wf-pal-tab ${leftTab === "copilot" ? "wf-pal-tab--on" : ""}`}
+              onClick={() => setLeftTab("copilot")}
+            >
+              <Sparkles size={11} /> Copilot
+            </button>
             <button
               type="button"
               className="wf-pal-collapse"
@@ -1830,33 +1921,56 @@ function WorkflowComposer({
               ‹
             </button>
           </div>
-          {phases.length === 0 && (
-            <div className="wf-pal-section wf-describe">
-              <span className="wf-compose__label">Describe it</span>
-              <textarea
-                className="wf-input wf-describe__input"
-                rows={3}
-                placeholder="e.g. review a PR: implement, run tests, code review, then a human approval gate"
-                value={aiPrompt}
-                onChange={(e) => setAiPrompt(e.target.value)}
-                disabled={aiBusy}
-              />
-              <button
-                type="button"
-                className="wf-describe__btn"
-                onClick={() => void runDescribe()}
-                disabled={aiBusy || !aiPrompt.trim()}
-              >
-                <Sparkles size={12} />
-                {aiBusy ? "Drafting…" : "Draft workflow"}
-              </button>
-              {aiError && <div className="wf-describe__err">{aiError}</div>}
-              <span className="wf-describe__hint">
-                Drafts editable phases onto the canvas — refine each before
-                creating.
-              </span>
+          {leftTab === "copilot" && (
+            <div className="wf-copilot">
+              <div className="wf-copilot__log" ref={chatScrollRef}>
+                {chat.length === 0 && (
+                  <div className="wf-copilot__empty">
+                    Ask me to build or edit this workflow — e.g. “add a security
+                    review after code-review, and route its fail verdict back to
+                    implementation”.
+                  </div>
+                )}
+                {chat.map((m, i) => (
+                  <div key={i} className={`wf-copilot__msg wf-copilot__msg--${m.role}`}>
+                    {m.text}
+                  </div>
+                ))}
+                {chatBusy && (
+                  <div className="wf-copilot__msg wf-copilot__msg--assistant wf-copilot__thinking">
+                    thinking…
+                  </div>
+                )}
+              </div>
+              <div className="wf-copilot__compose">
+                <textarea
+                  className="wf-input wf-copilot__input"
+                  rows={2}
+                  placeholder="Tell the copilot what to change…"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      void sendCopilot();
+                    }
+                  }}
+                  disabled={chatBusy}
+                />
+                <button
+                  type="button"
+                  className="wf-copilot__send"
+                  onClick={() => void sendCopilot()}
+                  disabled={chatBusy || !chatInput.trim()}
+                  aria-label="Send"
+                >
+                  <Sparkles size={13} />
+                </button>
+              </div>
             </div>
           )}
+          {leftTab === "library" && (
+          <>
           {phases.length === 0 && templates.length > 0 && (
             <div className="wf-pal-section">
               <span className="wf-compose__label">Templates</span>
@@ -1939,6 +2053,8 @@ function WorkflowComposer({
               + New phase
             </button>
           </div>
+          </>
+          )}
         </aside>
         )}
 
