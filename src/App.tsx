@@ -25,6 +25,7 @@ import { Bridge } from "./components/Bridge";
 import { CommandPane } from "./components/CommandPane";
 import { StatusBar } from "./components/StatusBar";
 import { CommandPalette } from "./components/CommandPalette";
+import { useWispTray } from "./lib/useWispTray";
 
 interface DaemonStatusChangedPayload {
   status: string;
@@ -161,6 +162,8 @@ function AppShell() {
     { enableOnFormTags: true, enableOnContentEditable: true },
     [toggleCommand],
   );
+
+  useWispTray();
 
   if (location.pathname.startsWith("/popup")) {
     return <PopupView />;

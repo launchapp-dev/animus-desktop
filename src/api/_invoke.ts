@@ -324,6 +324,12 @@ export const settingsGetTunnelUrl = () =>
 export const settingsSetTunnelUrl = (url: string) =>
   safeInvoke<string>("settings_set_tunnel_url", { url }, url);
 
+// Wisp tray
+export async function setWispExpression(expression: string): Promise<void> {
+  // No-ops outside Tauri (vitest/browser) and if the command isn't built yet.
+  await safeInvoke<void>("set_wisp_expression", { expression }, undefined);
+}
+
 // Project management
 export const projectList = () =>
   safeInvoke<Project[]>("project_list", undefined, MOCK_PROJECTS);
