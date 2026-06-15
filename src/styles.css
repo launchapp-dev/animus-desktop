@@ -8292,6 +8292,26 @@ textarea.wf-input { font-family: var(--font-mono); font-size: 11.5px; resize: ve
 .wf-template__name { font-size: 12.5px; font-weight: 600; color: var(--text); }
 .wf-template__desc { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
 .wf-template__phases { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); }
+/* AI "Describe it" authoring */
+.wf-describe { gap: 6px; }
+.wf-describe__input { resize: vertical; font-size: 11.5px; line-height: 1.45; }
+.wf-describe__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 7px 0;
+  border-radius: var(--radius-pill);
+  background: var(--copper);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.wf-describe__btn:hover:not(:disabled) { background: var(--copper-hover); }
+.wf-describe__btn:disabled { opacity: 0.55; cursor: default; }
+.wf-describe__err { font-size: 10.5px; color: var(--crimson); line-height: 1.4; }
+.wf-describe__hint { font-size: 9.5px; color: var(--text-faint); line-height: 1.4; }
 /* Template cards with phase-chain thumbnail */
 .wf-tcard {
   display: flex;
