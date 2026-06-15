@@ -14,6 +14,8 @@ import {
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useProjectsStore } from "../state/projects";
 import { useActiveProject } from "../state/activeProject";
+import { Wisp } from "./Wisp";
+import { useWispState } from "../lib/useWispState";
 import {
   chatListAll,
   chatRename,
@@ -257,6 +259,7 @@ export function ProjectsRail({
   const setActive = useActiveProject((s) => s.setActiveProject);
   const openConversation = useActiveProject((s) => s.openConversation);
   const { toggleSidebar } = useSidebar();
+  const wispExpression = useWispState();
 
   const [conversations, setConversations] = useState<ProjectConversation[]>([]);
   const [convFilter, setConvFilter] = useState("");
@@ -372,11 +375,10 @@ export function ProjectsRail({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span
-              aria-hidden
-              className="inline-block size-[9px] rounded-full bg-[var(--copper)] shrink-0 shadow-[0_0_8px_rgba(217,119,87,0.55)]"
-            />
-            <span className="font-[var(--font-display)] text-[15px] font-semibold tracking-[-0.02em] text-sidebar-foreground">
-              Animus
+              className="inline-flex shrink-0"
+              style={{ ["--wisp-eye" as string]: "var(--sidebar-bg)" }}
+            >
+              <Wisp expression={wispExpression} size={22} title="Animus" />
             </span>
           </div>
           <button
