@@ -1363,12 +1363,21 @@ function parsePlan(text: string): DraftPlan | { error: string } {
     const raw = Array.isArray(o.phases) ? o.phases : [];
     const phases: DraftPhase[] = raw
       .filter((p): p is Record<string, unknown> => !!p && typeof p === "object")
-      .map((p) => ({
-        id: String(p.id ?? "").trim(),
-        mode: p.mode === "command" ? "command" : "agent",
-        agent: typeof p.agent === "string" ? p.agent : undefined,
-        directive: typeof p.directive === "string" ? p.directive : undefined,
-      }))
+      .map((p) => {
+        const m = String(p.mode ?? "agent");
+        const mode =
+          m === "command"
+            ? "command"
+            : m === "manual" || m === "approval" || m === "gate"
+              ? "manual"
+              : "agent";
+        return {
+          id: String(p.id ?? "").trim(),
+          mode,
+          agent: typeof p.agent === "string" ? p.agent : undefined,
+          directive: typeof p.directive === "string" ? p.directive : undefined,
+        };
+      })
       .filter((p) => SLUG_RE.test(p.id));
     if (phases.length === 0) return { error: "No valid phases in the plan." };
     return {
@@ -1551,13 +1560,21 @@ function WorkflowComposer({
                 command: { program: "", args: [] },
                 decision_contract: null,
               }
-            : {
-                mode: "agent",
-                agent_id: agentOk ? ph.agent : fallbackAgent,
-                directive: ph.directive ?? null,
-                command: null,
-                decision_contract: null,
-              };
+            : ph.mode === "manual"
+              ? {
+                  mode: "manual",
+                  agent_id: null,
+                  directive: ph.directive ?? null,
+                  command: null,
+                  decision_contract: null,
+                }
+              : {
+                  mode: "agent",
+                  agent_id: agentOk ? ph.agent : fallbackAgent,
+                  directive: ph.directive ?? null,
+                  command: null,
+                  decision_contract: null,
+                };
         try {
           await animusWorkflowPhaseUpsert(repoPath, ph.id, runtime);
         } catch {
