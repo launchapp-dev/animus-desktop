@@ -260,6 +260,13 @@ export function ProjectsRail({
   const openConversation = useActiveProject((s) => s.openConversation);
   const { toggleSidebar } = useSidebar();
   const wispExpression = useWispState();
+  const wispTooltip = {
+    awake: "Animus · daemon running — idle and ready",
+    working: "Animus · a cycle is running",
+    done: "Animus · cycle passed",
+    resting: "Animus · daemon stopped",
+    "needs-you": "Animus · needs you — daemon not installed, or a cycle is blocked or failed",
+  }[wispExpression];
 
   const [conversations, setConversations] = useState<ProjectConversation[]>([]);
   const [convFilter, setConvFilter] = useState("");
@@ -373,14 +380,17 @@ export function ProjectsRail({
     <Sidebar variant="sidebar" collapsible="offcanvas">
       <SidebarHeader className="flex-col gap-2.5 px-3 pt-3 pb-1.5">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span
-              className="inline-flex shrink-0"
-              style={{ ["--wisp-eye" as string]: "var(--sidebar-bg)" }}
-            >
-              <Wisp expression={wispExpression} size={22} title="Animus" />
+          {/* Horizontal lockup: Wisp mark + wordmark (design §08 · PRIMARY). */}
+          <span
+            className="inline-flex items-center gap-2"
+            style={{ ["--wisp-eye" as string]: "var(--sidebar-bg)" }}
+            title={wispTooltip}
+          >
+            <Wisp expression={wispExpression} size={40} title={wispTooltip} />
+            <span className="font-[var(--font-display)] text-[22px] font-bold leading-none tracking-[0.005em] text-sidebar-foreground">
+              animus
             </span>
-          </div>
+          </span>
           <button
             type="button"
             onClick={toggleSidebar}
