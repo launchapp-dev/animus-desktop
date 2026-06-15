@@ -88,6 +88,12 @@ export function CommandPalette({
             <CommandShortcut>⌘,</CommandShortcut>
           </CommandItem>
           <CommandItem
+            onSelect={() => runAndClose(() => setActiveProject("wisp"))}
+          >
+            <SettingsIcon className="text-text-muted" />
+            <span>Wisp design system</span>
+          </CommandItem>
+          <CommandItem
             value="refresh-projects"
             onSelect={() =>
               runAndClose(() => useProjectsStore.getState().refresh())

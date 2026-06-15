@@ -4,6 +4,7 @@ import { useProjectsStore } from "../state/projects";
 import { useActiveProject, type BridgeMode } from "../state/activeProject";
 import { useDaemonStore } from "../state/daemon";
 import { ProjectList } from "../views/ProjectList";
+import { WispShowcase } from "../views/WispShowcase";
 import { DaemonView, Settings } from "../views/Settings";
 import { WorkflowsView } from "../views/project/WorkflowsView";
 import { VisualizeView } from "../views/project/VisualizeView";
@@ -275,6 +276,14 @@ export function Bridge({ onAddProject }: { onAddProject: () => void }) {
     return (
       <BridgeFrame title="Settings">
         <Settings />
+      </BridgeFrame>
+    );
+  }
+
+  if (activeId === "wisp") {
+    return (
+      <BridgeFrame title="Wisp design system">
+        <WispShowcase />
       </BridgeFrame>
     );
   }
