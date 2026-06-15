@@ -728,6 +728,7 @@ function PhaseConfigPanel({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -742,6 +743,7 @@ function PhaseConfigPanel({
           setAgentId(String(rt.agent_id ?? ""));
           setDirective(typeof rt.directive === "string" ? rt.directive : "");
           setGate(rt.decision_contract != null);
+          setAdvancedOpen(rt.decision_contract != null);
           const cmd = rt.command as { program?: string; args?: string[] } | null;
           if (cmd) {
             setProgram(cmd.program ?? "");
@@ -854,14 +856,6 @@ function PhaseConfigPanel({
                 <span>Directive</span>
                 <DirectiveField value={directive} onChange={setDirective} rows={6} />
               </label>
-              <label className="wf-check">
-                <input
-                  type="checkbox"
-                  checked={gate}
-                  onChange={(e) => setGate(e.target.checked)}
-                />
-                <span>Decision gate</span>
-              </label>
             </>
           )}
           {mode === "command" && (
@@ -884,35 +878,60 @@ function PhaseConfigPanel({
               </label>
             </>
           )}
-          {gate && onRoutes && siblingPhases && (
-            <div className="wf-field wf-routes">
-              <span>Verdict routing</span>
-              <p className="wf-routes__hint">
-                Where each decision verdict sends the run. Leave on default to
-                advance (pass) or halt (fail).
-              </p>
-              {verdicts.map((v) => (
-                <div key={v} className="wf-routes__row">
-                  <span className={`wf-routes__verdict wf-routes__verdict--${v.toLowerCase()}`}>
-                    {v}
-                    {VERDICT_HINT[v.toLowerCase()] && (
-                      <em>{VERDICT_HINT[v.toLowerCase()]}</em>
-                    )}
-                  </span>
-                  <select
-                    className="wf-input wf-routes__select"
-                    value={routes?.[v] ?? ""}
-                    onChange={(e) => onRoutes(v, e.target.value)}
-                  >
-                    <option value="">→ default</option>
-                    {siblingPhases.map((p) => (
-                      <option key={p} value={p}>
-                        → {p}
-                      </option>
-                    ))}
-                  </select>
+          {mode === "agent" && (
+            <div className="wf-adv">
+              <button
+                type="button"
+                className="wf-adv__toggle"
+                onClick={() => setAdvancedOpen((v) => !v)}
+              >
+                <span className="wf-adv__caret">{advancedOpen ? "▾" : "▸"}</span>
+                Advanced
+                {gate && <span className="wf-adv__tag">gate</span>}
+              </button>
+              {advancedOpen && (
+                <div className="wf-adv__body">
+                  <label className="wf-check">
+                    <input
+                      type="checkbox"
+                      checked={gate}
+                      onChange={(e) => setGate(e.target.checked)}
+                    />
+                    <span>Decision gate (branches on verdict)</span>
+                  </label>
+                  {gate && onRoutes && siblingPhases && (
+                    <div className="wf-field wf-routes">
+                      <span>Verdict routing</span>
+                      <p className="wf-routes__hint">
+                        Where each decision verdict sends the run. Leave on
+                        default to advance (pass) or halt (fail).
+                      </p>
+                      {verdicts.map((v) => (
+                        <div key={v} className="wf-routes__row">
+                          <span className={`wf-routes__verdict wf-routes__verdict--${v.toLowerCase()}`}>
+                            {v}
+                            {VERDICT_HINT[v.toLowerCase()] && (
+                              <em>{VERDICT_HINT[v.toLowerCase()]}</em>
+                            )}
+                          </span>
+                          <select
+                            className="wf-input wf-routes__select"
+                            value={routes?.[v] ?? ""}
+                            onChange={(e) => onRoutes(v, e.target.value)}
+                          >
+                            <option value="">→ default</option>
+                            {siblingPhases.map((p) => (
+                              <option key={p} value={p}>
+                                → {p}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              ))}
+              )}
             </div>
           )}
           {error && <div className="wf-compose__err">{error}</div>}

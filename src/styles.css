@@ -8088,6 +8088,32 @@ textarea.wf-input { font-family: var(--font-mono); font-size: 11.5px; resize: ve
 }
 .wf-directive__modal-head { display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 600; color: var(--text); }
 .wf-directive__modal-area { flex: 1; resize: none; font-size: 13px; line-height: 1.55; }
+/* Inspector Advanced collapsible */
+.wf-adv { border-top: var(--hairline) solid var(--border); padding-top: 8px; margin-top: 2px; }
+.wf-adv__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+.wf-adv__toggle:hover { color: var(--text); }
+.wf-adv__caret { font-size: 9px; width: 10px; }
+.wf-adv__tag {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--yellow);
+  background: var(--yellow-bg);
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+.wf-adv__body { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 /* Per-verdict routing rows (builder inspector) */
 .wf-routes { display: flex; flex-direction: column; gap: 6px; }
 .wf-routes__hint { margin: 0; font-size: 10.5px; line-height: 1.45; color: var(--text-faint); }
