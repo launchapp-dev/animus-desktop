@@ -1377,6 +1377,22 @@ function WorkflowComposer({
   const [showReview, setShowReview] = useState(false);
   const lintWarnings = lint.filter((l) => l.level === "warn");
 
+  // Every {{dispatch_input}} variable referenced across the chosen phases,
+  // mapped to the phases that use it — the workflow's input surface.
+  const inputVars = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const p of phases) {
+      const dir = phaseInfo[p]?.directive ?? "";
+      for (const m of dir.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g)) {
+        const v = m[1]!;
+        const cur = map.get(v) ?? [];
+        if (!cur.includes(p)) cur.push(p);
+        map.set(v, cur);
+      }
+    }
+    return [...map.entries()];
+  }, [phases, phaseInfo]);
+
   const addPhase = (p: string) => {
     if (p && !phases.includes(p)) setPhases((prev) => [...prev, p]);
   };
@@ -1596,13 +1612,46 @@ function WorkflowComposer({
                 <button
                   key={t.id}
                   type="button"
-                  className="wf-template"
+                  className="wf-tcard"
                   onClick={() => applyTemplate(t)}
+                  title={t.description}
                 >
-                  <span className="wf-template__name">{t.name}</span>
-                  <span className="wf-template__phases">{t.usable.join(" → ")}</span>
+                  <span className="wf-tcard__head">
+                    <span className="wf-tcard__name">{t.name}</span>
+                    <span className="wf-tcard__count">
+                      {t.usable.length} phase{t.usable.length === 1 ? "" : "s"}
+                    </span>
+                  </span>
+                  <span className="wf-tcard__chain" aria-hidden>
+                    {t.usable.map((p, i) => (
+                      <span key={p} className="wf-tcard__chain-seg">
+                        <span className="wf-tcard__dot" />
+                        {i < t.usable.length - 1 && <span className="wf-tcard__link" />}
+                      </span>
+                    ))}
+                  </span>
                 </button>
               ))}
+            </div>
+          )}
+          {inputVars.length > 0 && (
+            <div className="wf-pal-section">
+              <span className="wf-compose__label">Inputs</span>
+              <p className="wf-pal-note">
+                dispatch_input variables these phases reference
+              </p>
+              <div className="wf-pal-vars">
+                {inputVars.map(([v, where]) => (
+                  <span
+                    key={v}
+                    className="wf-pal-var"
+                    title={`used in: ${where.join(", ")}`}
+                  >
+                    {`{{${v}}}`}
+                    <em>{where.length}</em>
+                  </span>
+                ))}
+              </div>
             </div>
           )}
           <div className="wf-pal-section wf-pal-section--grow">
