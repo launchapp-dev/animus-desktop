@@ -1047,7 +1047,7 @@ code {
 .wisp-svg { transform-origin: center; overflow: visible; }
 .wisp--breathe { animation: wispBreathe 3s ease-in-out infinite; }
 .wisp--flicker { animation: wispFlicker 1.6s ease-in-out infinite; }
-.wisp--working { animation: wispLean 1.4s ease-in-out infinite; transform-origin: 50% 75%; }
+.wisp--working { animation: wispLean 1.4s ease-in-out infinite; transform-origin: 32px 48px; }
 .wisp--ignite  { animation: wispIgnite 0.7s cubic-bezier(0.34,1.56,0.64,1) 1; }
 .wisp--celebrate { animation: wispHop 1.8s ease-in-out infinite; transform-origin: 50% 78%; }
 .wisp--blink   { animation: wispBlink 4.2s ease-in-out infinite; }
