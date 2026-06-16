@@ -5,6 +5,7 @@ import { Paperclip, ArrowDown, Brain } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useHotkeys } from "react-hotkeys-hook";
 import { AgentFace, type AgentState } from "../../components/AgentFace";
+import { Wisp } from "../../components/Wisp";
 import { ProviderLogo } from "../../components/ProviderLogo";
 import { CopyButton } from "../../components/CopyButton";
 import { TurnTimeline } from "../../components/TurnTimeline";
@@ -280,8 +281,9 @@ function ensureStreamListeners() {
   );
 }
 
-/** The master/orchestrator gets an intentional gradient orb with a glyph,
- *  not a random generated face. Real agents keep their AgentFace. */
+/** The master/orchestrator gets the Wisp brand mark on a slate disc (the same
+ *  flame-on-tile pattern as the app icon), not a random generated face. Real
+ *  agents keep their AgentFace. */
 function ChatAvatar({
   agentId,
   size,
@@ -297,9 +299,16 @@ function ChatAvatar({
   return (
     <span
       className="cx-master"
-      style={{ width: size, height: size }}
+      style={{
+        width: size,
+        height: size,
+        // Eyes punch through to the slate disc, not the page background.
+        ["--wisp-eye" as string]: "var(--bg-deep)",
+      }}
       aria-label="Animus Agent"
-    />
+    >
+      <Wisp expression="awake" size={Math.round(size * 0.76)} title="Animus Agent" />
+    </span>
   );
 }
 
@@ -351,10 +360,15 @@ function Composer({
   useEffect(() => {
     if (autofocus) taRef.current?.focus();
   }, [autofocus]);
-  function autoGrow(el: HTMLTextAreaElement) {
+  const autoGrow = useCallback((el: HTMLTextAreaElement) => {
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-  }
+    el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
+  }, []);
+  // Resize for every value change — restored drafts, suggestion-chip inserts,
+  // and programmatic clears — not just live keystrokes.
+  useEffect(() => {
+    if (taRef.current) autoGrow(taRef.current);
+  }, [prompt, autoGrow]);
   const name = agentId ? `@${agentId}` : "Animus";
   return (
     <div className="cx-composer">
@@ -393,7 +407,7 @@ function Composer({
         </button>
         {/* agent chip */}
         <label
-          className={`cx-chip ${lockHarness ? "cx-chip--locked" : ""}`}
+          className={`cx-chip cx-chip--agent ${lockHarness ? "cx-chip--locked" : ""}`}
           title={
             lockHarness
               ? "Locked for this conversation — start a new chat to switch"
@@ -455,12 +469,11 @@ function Composer({
               value={model}
               onChange={(e) => setModel(e.target.value)}
             >
-              {currentProvider.models.map((m) => (
+              {[...new Set(currentProvider.models)].map((m) => (
                 <option key={m} value={m}>
                   {m}
                 </option>
               ))}
-              <option value="">default</option>
             </select>
           ) : (
             <input
@@ -528,8 +541,14 @@ function Composer({
   );
 }
 
+/** The provider roster is a global, app-wide list (not project-scoped), so we
+ *  cache it across ChatView mounts. Without this, navigating away from Chat and
+ *  back remounts the view and re-fetches from an empty list, briefly flashing a
+ *  nameless provider chip and a clipped model field before the data settles. */
+let cachedProviders: ProviderOption[] = [];
+
 export function ChatView({ project }: { project: Project }) {
-  const [providers, setProviders] = useState<ProviderOption[]>([]);
+  const [providers, setProviders] = useState<ProviderOption[]>(cachedProviders);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const pc = useChatStore((s) => s.projects[project.id]) ?? EMPTY_PROJECT_CHAT;
   const { viewing } = pc;
@@ -537,8 +556,18 @@ export function ChatView({ project }: { project: Project }) {
   const queue = pc.queues[viewing] ?? EMPTY_QUEUE;
   const queuePaused = pc.paused[viewing] ?? false;
   const activeSession = pc.active[viewing] ?? null;
-  const tool = pc.harness?.tool ?? "claude";
-  const model = pc.harness?.model ?? "";
+  // Resolve tool/model SYNCHRONOUSLY from the cached provider roster. Bridge
+  // remounts ChatView on every project switch, so without a synchronous default
+  // the model is "" on first render (rendered as "default") until the async
+  // provider effect lands a concrete value — the visible "default → model"
+  // flash. `providers` is seeded from the module-level cache, so this is filled
+  // in immediately on every mount after the first provider fetch.
+  const defaultProvider = providers.find((p) => p.installed) ?? providers[0];
+  const tool = pc.harness?.tool ?? defaultProvider?.tool ?? "claude";
+  const model =
+    pc.harness?.model ||
+    providers.find((p) => p.tool === tool)?.models?.[0] ||
+    "";
   const agentId = pc.harness?.agentId ?? "";
   // Reasoning effort for the NEXT turn ("" = provider default).
   const effort = pc.harness?.effort ?? "";
@@ -700,6 +729,7 @@ export function ChatView({ project }: { project: Project }) {
   useEffect(() => {
     chatProviders()
       .then((p) => {
+        cachedProviders = p;
         setProviders(p);
         const firstInstalled = p.find((x) => x.installed) ?? p[0];
         // Defaults only apply before the user (or a reopened conversation)
@@ -1029,7 +1059,6 @@ export function ChatView({ project }: { project: Project }) {
             <span className="cx-activehead__name">{headName}</span>
             <code className="cx-activehead__model">
               {currentProvider?.name ?? tool}
-              {model ? ` · ${model}` : ""}
             </code>
             <button
               type="button"
